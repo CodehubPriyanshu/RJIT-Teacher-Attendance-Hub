@@ -14,16 +14,190 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      attendance: {
+        Row: {
+          attendance_date: string
+          check_in: string | null
+          check_out: string | null
+          created_at: string
+          early_departure_minutes: number
+          id: string
+          late_minutes: number
+          status: string
+          teacher_id: string
+        }
+        Insert: {
+          attendance_date: string
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string
+          early_departure_minutes?: number
+          id?: string
+          late_minutes?: number
+          status?: string
+          teacher_id: string
+        }
+        Update: {
+          attendance_date?: string
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string
+          early_departure_minutes?: number
+          id?: string
+          late_minutes?: number
+          status?: string
+          teacher_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      monthly_summary: {
+        Row: {
+          created_at: string
+          id: string
+          month: number
+          teacher_id: string
+          total_absent_days: number
+          total_early_departure_minutes: number
+          total_late_minutes: number
+          total_working_days: number
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          month: number
+          teacher_id: string
+          total_absent_days?: number
+          total_early_departure_minutes?: number
+          total_late_minutes?: number
+          total_working_days?: number
+          year: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          month?: number
+          teacher_id?: string
+          total_absent_days?: number
+          total_early_departure_minutes?: number
+          total_late_minutes?: number
+          total_working_days?: number
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monthly_summary_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      settings: {
+        Row: {
+          departure_time: string
+          google_sheet_id: string | null
+          grace_minutes: number
+          id: string
+          reporting_time: string
+          updated_at: string
+        }
+        Insert: {
+          departure_time?: string
+          google_sheet_id?: string | null
+          grace_minutes?: number
+          id?: string
+          reporting_time?: string
+          updated_at?: string
+        }
+        Update: {
+          departure_time?: string
+          google_sheet_id?: string | null
+          grace_minutes?: number
+          id?: string
+          reporting_time?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      teachers: {
+        Row: {
+          created_at: string
+          department: string | null
+          email: string | null
+          employee_id: string
+          id: string
+          name: string
+          phone: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          department?: string | null
+          email?: string | null
+          employee_id: string
+          id?: string
+          name: string
+          phone?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          department?: string | null
+          email?: string | null
+          employee_id?: string
+          id?: string
+          name?: string
+          phone?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +324,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
