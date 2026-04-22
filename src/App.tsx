@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import UploadAttendance from "./pages/UploadAttendance";
 import Attendance from "./pages/Attendance";
 import MonthlySummary from "./pages/MonthlySummary";
+import Holidays from "./pages/Holidays";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/upload" element={<Shell><UploadAttendance /></Shell>} />
             <Route path="/attendance" element={<Shell><Attendance /></Shell>} />
             <Route path="/monthly" element={<Shell><MonthlySummary /></Shell>} />
+            <Route path="/holidays" element={<Shell><Holidays /></Shell>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
