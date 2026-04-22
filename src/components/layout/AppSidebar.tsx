@@ -1,7 +1,6 @@
 import { NavLink as RRNavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
-  Upload,
   ClipboardList,
   CalendarDays,
   LogOut,
@@ -13,7 +12,6 @@ import { useAuth } from "@/hooks/useAuth";
 
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/upload", label: "Upload Attendance", icon: Upload },
   { to: "/attendance", label: "Attendance Records", icon: ClipboardList },
   { to: "/monthly", label: "Monthly Summary", icon: CalendarDays },
   { to: "/holidays", label: "Holiday and Working Days", icon: PartyPopper },

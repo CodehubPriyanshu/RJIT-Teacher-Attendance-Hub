@@ -8,7 +8,6 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import UploadAttendance from "./pages/UploadAttendance";
 import Attendance from "./pages/Attendance";
 import MonthlySummary from "./pages/MonthlySummary";
 import Holidays from "./pages/Holidays";
@@ -32,7 +31,6 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<Shell><Dashboard /></Shell>} />
-            <Route path="/upload" element={<Shell><UploadAttendance /></Shell>} />
             <Route path="/attendance" element={<Shell><Attendance /></Shell>} />
             <Route path="/monthly" element={<Shell><MonthlySummary /></Shell>} />
             <Route path="/holidays" element={<Shell><Holidays /></Shell>} />
