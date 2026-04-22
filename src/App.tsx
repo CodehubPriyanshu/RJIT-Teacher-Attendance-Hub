@@ -8,12 +8,9 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Teachers from "./pages/Teachers";
+import UploadAttendance from "./pages/UploadAttendance";
 import Attendance from "./pages/Attendance";
-import LateReport from "./pages/LateReport";
 import MonthlySummary from "./pages/MonthlySummary";
-import Sync from "./pages/Sync";
-import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -34,12 +31,9 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<Shell><Dashboard /></Shell>} />
-            <Route path="/teachers" element={<Shell><Teachers /></Shell>} />
+            <Route path="/upload" element={<Shell><UploadAttendance /></Shell>} />
             <Route path="/attendance" element={<Shell><Attendance /></Shell>} />
-            <Route path="/late-report" element={<Shell><LateReport /></Shell>} />
             <Route path="/monthly" element={<Shell><MonthlySummary /></Shell>} />
-            <Route path="/sync" element={<Shell><Sync /></Shell>} />
-            <Route path="/settings" element={<Shell><SettingsPage /></Shell>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
