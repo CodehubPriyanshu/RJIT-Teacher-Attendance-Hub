@@ -1,12 +1,9 @@
 import { NavLink as RRNavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
-  Users,
+  Upload,
   ClipboardList,
-  AlarmClock,
   CalendarDays,
-  RefreshCw,
-  Settings as SettingsIcon,
   LogOut,
   GraduationCap,
 } from "lucide-react";
@@ -15,12 +12,9 @@ import { useAuth } from "@/hooks/useAuth";
 
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/teachers", label: "Teachers Management", icon: Users },
+  { to: "/upload", label: "Upload Attendance", icon: Upload },
   { to: "/attendance", label: "Attendance Records", icon: ClipboardList },
-  { to: "/late-report", label: "Late Attendance Report", icon: AlarmClock },
   { to: "/monthly", label: "Monthly Summary", icon: CalendarDays },
-  { to: "/sync", label: "Google Sheet Sync", icon: RefreshCw },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function AppSidebar() {

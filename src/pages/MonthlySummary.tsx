@@ -1,157 +1,206 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, FileSpreadsheet } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import * as XLSX from "xlsx";
+import { toast } from "sonner";
 
-const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+interface Agg {
+  employee_id: string;
+  first_name: string;
+  department: string | null;
+  total_working_days: number;
+  total_present_days: number;
+  total_absent_days: number;
+  total_late_minutes: number;
+  total_early_departure_minutes: number;
+}
+
+const months = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 export default function MonthlySummary() {
   const now = new Date();
-  const [month, setMonth] = useState((now.getMonth() + 1).toString());
-  const [year, setYear] = useState(now.getFullYear().toString());
-  const [rows, setRows] = useState<any[]>([]);
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [search, setSearch] = useState("");
+  const [data, setData] = useState<Agg[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      // compute on the fly from attendance
+  const load = async () => {
+    setLoading(true);
+    try {
       const m = parseInt(month, 10);
       const y = parseInt(year, 10);
       const start = `${y}-${String(m).padStart(2, "0")}-01`;
-      const end = new Date(y, m, 0);
-      const endStr = `${y}-${String(m).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+      const endDate = new Date(y, m, 0).getDate();
+      const end = `${y}-${String(m).padStart(2, "0")}-${String(endDate).padStart(2, "0")}`;
 
-      const { data: teachers } = await supabase.from("teachers").select("id, name, employee_id, department").eq("status", "active");
-      const { data: att } = await supabase
-        .from("attendance")
-        .select("*")
-        .gte("attendance_date", start)
-        .lte("attendance_date", endStr);
+      const all: any[] = [];
+      const PAGE = 1000;
+      let offset = 0;
+      while (true) {
+        const { data: chunk, error } = await supabase
+          .from("attendance_records")
+          .select("employee_id, first_name, department, status, late_minutes, early_departure_minutes")
+          .gte("attendance_date", start)
+          .lte("attendance_date", end)
+          .range(offset, offset + PAGE - 1);
+        if (error) throw error;
+        const list = chunk ?? [];
+        all.push(...list);
+        if (list.length < PAGE) break;
+        offset += PAGE;
+        if (all.length >= 200000) break;
+      }
 
-      const summary = (teachers ?? []).map((t: any) => {
-        const records = (att ?? []).filter((a: any) => a.teacher_id === t.id);
-        const totalLate = records.reduce((s: number, r: any) => s + (r.late_minutes || 0), 0);
-        const totalEarly = records.reduce((s: number, r: any) => s + (r.early_departure_minutes || 0), 0);
-        const present = records.filter((r: any) => r.status !== "absent" && r.check_in).length;
-        const workingDays = records.length;
-        const absent = records.filter((r: any) => r.status === "absent").length;
-        return {
-          name: t.name,
-          employee_id: t.employee_id,
-          department: t.department,
-          total_working_days: workingDays,
-          total_present: present,
-          total_absent_days: absent,
-          total_late_minutes: totalLate,
-          total_early_departure_minutes: totalEarly,
-        };
-      });
-      setRows(summary);
-    })();
+      const map = new Map<string, Agg>();
+      for (const r of all) {
+        const key = r.employee_id;
+        if (!map.has(key)) {
+          map.set(key, {
+            employee_id: r.employee_id,
+            first_name: r.first_name,
+            department: r.department,
+            total_working_days: 0,
+            total_present_days: 0,
+            total_absent_days: 0,
+            total_late_minutes: 0,
+            total_early_departure_minutes: 0,
+          });
+        }
+        const a = map.get(key)!;
+        a.total_working_days++;
+        if (r.status === "absent") a.total_absent_days++;
+        else a.total_present_days++;
+        a.total_late_minutes += r.late_minutes ?? 0;
+        a.total_early_departure_minutes += r.early_departure_minutes ?? 0;
+      }
+      setData(Array.from(map.values()).sort((a, b) => a.first_name.localeCompare(b.first_name)));
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
 
-  const dataForExport = useMemo(() => rows.map((r) => ({
-    Teacher: r.name,
-    "Employee ID": r.employee_id,
-    Department: r.department ?? "",
-    "Working Days": r.total_working_days,
-    Present: r.total_present,
-    "Absent Days": r.total_absent_days,
-    "Late Minutes": r.total_late_minutes,
-    "Early Dep. Minutes": r.total_early_departure_minutes,
-  })), [rows]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return data;
+    return data.filter(
+      (r) => r.employee_id.toLowerCase().includes(q) || r.first_name.toLowerCase().includes(q),
+    );
+  }, [data, search]);
 
   const exportXlsx = () => {
-    const ws = XLSX.utils.json_to_sheet(dataForExport);
+    const ws = XLSX.utils.json_to_sheet(
+      filtered.map((r) => ({
+        "Employee ID": r.employee_id,
+        "Name": r.first_name,
+        "Department": r.department ?? "",
+        "Working Days": r.total_working_days,
+        "Present Days": r.total_present_days,
+        "Absent Days": r.total_absent_days,
+        "Late Minutes": r.total_late_minutes,
+        "Early Departure Minutes": r.total_early_departure_minutes,
+      })),
+    );
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Monthly");
-    XLSX.writeFile(wb, `monthly-${year}-${month}.xlsx`);
+    XLSX.writeFile(wb, `monthly_${year}_${month.padStart(2, "0")}.xlsx`);
   };
-  const exportCsv = () => {
-    const ws = XLSX.utils.json_to_sheet(dataForExport);
-    const csv = XLSX.utils.sheet_to_csv(ws);
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `monthly-${year}-${month}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  };
+
+  const years = Array.from({ length: 6 }, (_, i) => String(now.getFullYear() - i));
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h2 className="page-title">Monthly Summary</h2>
-          <p className="text-sm text-muted-foreground">Aggregated attendance by teacher.</p>
+          <p className="text-sm text-muted-foreground">Aggregated attendance per employee.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> CSV</Button>
-          <Button onClick={exportXlsx}><FileSpreadsheet className="h-4 w-4 mr-1" /> Excel</Button>
-        </div>
+        <Button onClick={exportXlsx} disabled={filtered.length === 0}>
+          <Download className="h-4 w-4 mr-2" /> Export Excel
+        </Button>
       </div>
 
       <Card className="shadow-card border-border/60 p-4">
-        <div className="grid sm:grid-cols-2 gap-3 max-w-md">
-          <div className="space-y-1.5">
-            <Label>Month</Label>
-            <Select value={month} onValueChange={setMonth}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {months.map((m, i) => <SelectItem key={m} value={(i + 1).toString()}>{m}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Year</Label>
-            <Select value={year} onValueChange={setYear}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 5 }).map((_, i) => {
-                  const y = (now.getFullYear() - i).toString();
-                  return <SelectItem key={y} value={y}>{y}</SelectItem>;
-                })}
-              </SelectContent>
-            </Select>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Select value={month} onValueChange={setMonth}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {months.map((m, i) => (
+                <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={year} onValueChange={setYear}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <div className="md:col-span-2 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Filter by Employee ID or Name"
+              className="pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
         </div>
       </Card>
 
-      <Card className="shadow-card border-border/60 overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead className="table-head">Teacher</TableHead>
-              <TableHead className="table-head">Employee ID</TableHead>
-              <TableHead className="table-head">Department</TableHead>
-              <TableHead className="table-head">Working Days</TableHead>
-              <TableHead className="table-head">Present</TableHead>
-              <TableHead className="table-head">Absent</TableHead>
-              <TableHead className="table-head">Total Late (min)</TableHead>
-              <TableHead className="table-head">Total Early Dep. (min)</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground">No data.</TableCell></TableRow>
-            )}
-            {rows.map((r) => (
-              <TableRow key={r.employee_id}>
-                <TableCell className="font-medium">{r.name}</TableCell>
-                <TableCell>{r.employee_id}</TableCell>
-                <TableCell>{r.department ?? "—"}</TableCell>
-                <TableCell>{r.total_working_days}</TableCell>
-                <TableCell>{r.total_present}</TableCell>
-                <TableCell className={r.total_absent_days > 0 ? "text-danger font-semibold" : ""}>{r.total_absent_days}</TableCell>
-                <TableCell className={r.total_late_minutes > 0 ? "text-danger font-semibold" : ""}>{r.total_late_minutes}</TableCell>
-                <TableCell className={r.total_early_departure_minutes > 0 ? "text-danger font-semibold" : ""}>{r.total_early_departure_minutes}</TableCell>
+      <Card className="shadow-card border-border/60">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50">
+                <TableHead className="table-head">Employee ID</TableHead>
+                <TableHead className="table-head">Name</TableHead>
+                <TableHead className="table-head">Department</TableHead>
+                <TableHead className="table-head">Working Days</TableHead>
+                <TableHead className="table-head">Present Days</TableHead>
+                <TableHead className="table-head">Absent Days</TableHead>
+                <TableHead className="table-head">Late Minutes</TableHead>
+                <TableHead className="table-head">Early Departure (min)</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 && !loading && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
+                    No data for selected month.
+                  </TableCell>
+                </TableRow>
+              )}
+              {filtered.map((r) => (
+                <TableRow key={r.employee_id}>
+                  <TableCell className="font-medium">{r.employee_id}</TableCell>
+                  <TableCell>{r.first_name}</TableCell>
+                  <TableCell>{r.department ?? "—"}</TableCell>
+                  <TableCell>{r.total_working_days}</TableCell>
+                  <TableCell className="text-success font-semibold">{r.total_present_days}</TableCell>
+                  <TableCell className="text-danger font-semibold">{r.total_absent_days}</TableCell>
+                  <TableCell>{r.total_late_minutes}</TableCell>
+                  <TableCell>{r.total_early_departure_minutes}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
     </div>
   );
