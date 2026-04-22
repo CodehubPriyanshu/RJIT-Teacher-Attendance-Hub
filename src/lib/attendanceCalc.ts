@@ -9,12 +9,22 @@ export const GRACE_MIN = 10;
 export const DEPARTURE_HOUR = 17;
 export const DEPARTURE_MIN = 0;
 
-export type ComputedStatus = "present" | "late" | "absent" | "early_departure";
+export type ComputedStatus = "present" | "late" | "absent" | "early_departure" | "incomplete";
 
 export interface ComputedAttendance {
   late_minutes: number;
   early_departure_minutes: number;
   status: ComputedStatus;
+  summary: string;
+}
+
+export function buildSummary(lateMin: number, earlyMin: number, status: ComputedStatus): string {
+  if (status === "absent") return "Absent";
+  if (status === "incomplete") return lateMin > 0 ? `Late by ${lateMin} min, no Last Punch` : "No Last Punch";
+  if (lateMin > 0 && earlyMin > 0) return `Late by ${lateMin} min and Early departure by ${earlyMin} min`;
+  if (lateMin > 0) return `Late by ${lateMin} min`;
+  if (earlyMin > 0) return `Early departure by ${earlyMin} min`;
+  return "On Time";
 }
 
 /** Parse "HH:MM" or "HH:MM:SS" or Excel decimal day (0..1) into minutes since midnight, or null. */
@@ -50,25 +60,37 @@ export function minutesToTimeStr(mins: number | null): string | null {
 }
 
 export function computeStatus(firstPunchMin: number | null, lastPunchMin: number | null): ComputedAttendance {
-  if (firstPunchMin === null && lastPunchMin === null) {
-    return { late_minutes: 0, early_departure_minutes: 0, status: "absent" };
+  // Validation rules:
+  // - Missing First Punch -> Absent
+  // - Missing Last Punch (but has First) -> Incomplete
+  // - Both present -> Present (with possible Late / Early Departure)
+  if (firstPunchMin === null) {
+    return { late_minutes: 0, early_departure_minutes: 0, status: "absent", summary: "Absent" };
   }
-  const reportLimit = REPORTING_HOUR * 60 + REPORTING_MIN + GRACE_MIN;
-  const departLimit = DEPARTURE_HOUR * 60 + DEPARTURE_MIN;
 
-  let late = 0;
-  if (firstPunchMin !== null && firstPunchMin > reportLimit) {
-    late = firstPunchMin - (REPORTING_HOUR * 60 + REPORTING_MIN) - GRACE_MIN;
-  }
+  const startMin = REPORTING_HOUR * 60 + REPORTING_MIN; // 09:00
+  const departLimit = DEPARTURE_HOUR * 60 + DEPARTURE_MIN; // 17:00
+
+  // Late = First Punch - 09:00 (only if > 09:00). Grace ignored per spec.
+  const late = firstPunchMin > startMin ? firstPunchMin - startMin : 0;
+
   let early = 0;
-  if (lastPunchMin !== null && lastPunchMin < departLimit) {
-    early = departLimit - lastPunchMin;
+  let status: ComputedStatus;
+  if (lastPunchMin === null) {
+    status = "incomplete";
+  } else {
+    early = lastPunchMin < departLimit ? departLimit - lastPunchMin : 0;
+    if (late > 0) status = "late";
+    else if (early > 0) status = "early_departure";
+    else status = "present";
   }
-  let status: ComputedStatus = "present";
-  if (late > 0) status = "late";
-  else if (early > 0) status = "early_departure";
 
-  return { late_minutes: late, early_departure_minutes: early, status };
+  return {
+    late_minutes: late,
+    early_departure_minutes: early,
+    status,
+    summary: buildSummary(late, early, status),
+  };
 }
 
 /** Excel date serial / string -> "YYYY-MM-DD" or null */

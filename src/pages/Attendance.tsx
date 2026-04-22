@@ -11,6 +11,7 @@ import { ArrowUpDown, Download, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
+import { buildSummary, type ComputedStatus } from "@/lib/attendanceCalc";
 
 interface Row {
   id: string;
@@ -148,8 +149,9 @@ export default function Attendance() {
           "First Punch": r.first_punch?.slice(0, 5) ?? "",
           "Last Punch": r.last_punch?.slice(0, 5) ?? "",
           "Total Time": r.total_time ?? "",
-          "Late Minutes": r.late_minutes,
-          "Early Departure Minutes": r.early_departure_minutes,
+          "Late (Min)": r.late_minutes,
+          "Early Dep. (Min)": r.early_departure_minutes,
+          Summary: buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus),
           Status: r.status,
         })),
       );
@@ -239,6 +241,7 @@ export default function Attendance() {
               <SelectItem value="present">Present</SelectItem>
               <SelectItem value="late">Late</SelectItem>
               <SelectItem value="early_departure">Early Departure</SelectItem>
+              <SelectItem value="incomplete">Incomplete</SelectItem>
               <SelectItem value="absent">Absent</SelectItem>
             </SelectContent>
           </Select>
@@ -291,15 +294,16 @@ export default function Attendance() {
                 <TableHead className="table-head">First Punch</TableHead>
                 <TableHead className="table-head">Last Punch</TableHead>
                 <TableHead className="table-head">Total Time</TableHead>
-                <TableHead className="table-head">Late (min)</TableHead>
-                <TableHead className="table-head">Early Dep. (min)</TableHead>
+                <TableHead className="table-head">Late (Min)</TableHead>
+                <TableHead className="table-head">Early Dep. (Min)</TableHead>
+                <TableHead className="table-head">Summary</TableHead>
                 <TableHead className="table-head">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={13} className="text-center text-muted-foreground py-10">
                     No records match your filters.
                   </TableCell>
                 </TableRow>
@@ -319,8 +323,11 @@ export default function Attendance() {
                     {r.last_punch?.slice(0, 5) ?? "—"}
                   </TableCell>
                   <TableCell>{r.total_time ?? "—"}</TableCell>
-                  <TableCell>{r.late_minutes}</TableCell>
-                  <TableCell>{r.early_departure_minutes}</TableCell>
+                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{r.late_minutes}</TableCell>
+                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{r.early_departure_minutes}</TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}>
+                    {buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}
+                  </TableCell>
                   <TableCell><StatusBadge status={r.status} /></TableCell>
                 </TableRow>
               ))}
@@ -354,7 +361,8 @@ function StatusBadge({ status }: { status: string }) {
     present: { label: "Present", cls: "bg-success/15 text-success border-success/30" },
     late: { label: "Late", cls: "bg-danger/15 text-danger border-danger/30" },
     absent: { label: "Absent", cls: "bg-muted text-muted-foreground border-border" },
-    early_departure: { label: "Early Dep.", cls: "bg-accent/20 text-accent-foreground border-accent/40" },
+    early_departure: { label: "Early Dep.", cls: "bg-warning/15 text-warning border-warning/30" },
+    incomplete: { label: "Incomplete", cls: "bg-accent/30 text-accent-foreground border-accent/50" },
   };
   const v = map[status] ?? map.present;
   return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
