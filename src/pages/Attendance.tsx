@@ -149,8 +149,9 @@ export default function Attendance() {
           "First Punch": r.first_punch?.slice(0, 5) ?? "",
           "Last Punch": r.last_punch?.slice(0, 5) ?? "",
           "Total Time": r.total_time ?? "",
-          "Late Minutes": r.late_minutes,
-          "Early Departure Minutes": r.early_departure_minutes,
+          "Late (Min)": r.late_minutes,
+          "Early Dep. (Min)": r.early_departure_minutes,
+          Summary: buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus),
           Status: r.status,
         })),
       );
