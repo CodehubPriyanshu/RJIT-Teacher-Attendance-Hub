@@ -6,6 +6,7 @@ import {
   CalendarDays,
   LogOut,
   GraduationCap,
+  PartyPopper,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,6 +16,7 @@ const items = [
   { to: "/upload", label: "Upload Attendance", icon: Upload },
   { to: "/attendance", label: "Attendance Records", icon: ClipboardList },
   { to: "/monthly", label: "Monthly Summary", icon: CalendarDays },
+  { to: "/holidays", label: "Holiday and Working Days", icon: PartyPopper },
 ];
 
 export function AppSidebar() {
