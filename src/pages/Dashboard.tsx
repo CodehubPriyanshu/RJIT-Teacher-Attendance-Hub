@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { computeWorkingDays } from "@/lib/workingDays";
 
 const StatCard = ({
   icon: Icon, label, value, sub, tone = "primary",
@@ -74,19 +75,14 @@ async function fetchAllInRange(from: string, to: string) {
   return all;
 }
 
-function aggregateByTeacher(rows: any[]): TeacherAgg[] {
-  // Group rows by employee_id+date to dedupe punches per day per teacher
+function aggregateByTeacher(rows: any[], workingDays: number): TeacherAgg[] {
   const perTeacher = new Map<string, TeacherAgg>();
-  // Track unique (emp, date) keys with the strongest status per day
   const dayMap = new Map<string, any>();
   for (const r of rows) {
     const k = `${r.employee_id}|${r.attendance_date}`;
     const existing = dayMap.get(k);
     if (!existing) dayMap.set(k, r);
-    else {
-      // Prefer present/late over absent
-      if (existing.status === "absent" && r.status !== "absent") dayMap.set(k, r);
-    }
+    else if (existing.status === "absent" && r.status !== "absent") dayMap.set(k, r);
   }
   for (const r of dayMap.values()) {
     const id = r.employee_id;
@@ -95,18 +91,17 @@ function aggregateByTeacher(rows: any[]): TeacherAgg[] {
         employee_id: id,
         name: r.first_name,
         department: r.department,
-        working: 0, present: 0, absent: 0, late: 0, early: 0, pct: 0,
+        working: workingDays, present: 0, absent: 0, late: 0, early: 0, pct: 0,
       });
     }
     const a = perTeacher.get(id)!;
-    a.working++;
     const hasBoth = !!r.first_punch && !!r.last_punch;
-    if (r.status === "absent" || !hasBoth) a.absent++;
-    else a.present++;
+    if (hasBoth && r.status !== "absent") a.present++;
     if ((r.late_minutes ?? 0) > 0) a.late++;
     if ((r.early_departure_minutes ?? 0) > 0) a.early++;
   }
   for (const a of perTeacher.values()) {
+    a.absent = Math.max(0, a.working - a.present);
     a.pct = a.working ? +(a.present / a.working * 100).toFixed(1) : 0;
   }
   return Array.from(perTeacher.values()).sort((a, b) => b.pct - a.pct);
@@ -163,9 +158,10 @@ export default function Dashboard() {
       });
       setTrend(Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date)));
 
-      // Month-wide teacher aggregation
+      // Month-wide teacher aggregation using holiday-aware working days
+      const monthWb = await computeWorkingDays(startOfMonth(new Date()), endOfMonth(new Date()));
       const monthRows = await fetchAllInRange(monthStart, monthEnd);
-      const aggMonth = aggregateByTeacher(monthRows);
+      const aggMonth = aggregateByTeacher(monthRows, monthWb.workingDays);
       setTeachers(aggMonth);
       if (aggMonth.length) {
         const sorted = [...aggMonth].sort((a, b) => b.pct - a.pct);
@@ -177,10 +173,12 @@ export default function Dashboard() {
         setHighest(null); setLowest(null); setMonthAvg(0);
       }
 
-      // Today aggregation
+      // Today aggregation: working days = 1 (or 0 if today is Sunday/holiday)
+      const todayDate = new Date();
+      const todayWb = await computeWorkingDays(todayDate, todayDate);
       const todayRows = await fetchAllInRange(today, today);
-      const aggToday = aggregateByTeacher(todayRows);
-      if (aggToday.length) {
+      const aggToday = aggregateByTeacher(todayRows, todayWb.workingDays);
+      if (aggToday.length && todayWb.workingDays > 0) {
         const avg = aggToday.reduce((s, x) => s + x.pct, 0) / aggToday.length;
         setTodayAvg(+avg.toFixed(1));
       } else setTodayAvg(0);
