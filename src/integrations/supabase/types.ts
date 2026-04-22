@@ -109,6 +109,36 @@ export type Database = {
         }
         Relationships: []
       }
+      holidays: {
+        Row: {
+          created_at: string
+          description: string | null
+          holiday_date: string
+          holiday_name: string
+          holiday_type: string
+          id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          holiday_date: string
+          holiday_name: string
+          holiday_type?: string
+          id?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          holiday_date?: string
+          holiday_name?: string
+          holiday_type?: string
+          id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       monthly_summary: {
         Row: {
           created_at: string
