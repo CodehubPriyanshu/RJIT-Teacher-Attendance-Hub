@@ -27,32 +27,42 @@ interface Row {
   status: string;
 }
 
-const PAGE_SIZE = 50;
+const PAGE_SIZES = [10, 25, 50, 100];
 type SortKey = "attendance_date" | "first_name";
 
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [teacherName, setTeacherName] = useState("");
+  const [teacherInput, setTeacherInput] = useState("");
   const [department, setDepartment] = useState<string>("all");
   const [departments, setDepartments] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [status, setStatus] = useState<string>("all");
+  const [lateOnly, setLateOnly] = useState<string>("all");
+  const [earlyOnly, setEarlyOnly] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("attendance_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
   const buildQuery = () => {
     let q = supabase.from("attendance_records").select("*", { count: "exact" });
     if (search) q = q.or(`employee_id.ilike.%${search}%,first_name.ilike.%${search}%`);
+    if (teacherName) q = q.ilike("first_name", `%${teacherName}%`);
     if (department !== "all") q = q.eq("department", department);
     if (from) q = q.gte("attendance_date", from);
     if (to) q = q.lte("attendance_date", to);
+    if (status !== "all") q = q.eq("status", status);
+    if (lateOnly === "yes") q = q.gt("late_minutes", 0);
+    if (earlyOnly === "yes") q = q.gt("early_departure_minutes", 0);
     q = q.order(sortKey, { ascending: sortDir === "asc" });
     return q;
   };
@@ -60,8 +70,8 @@ export default function Attendance() {
   const fetchPage = async () => {
     setLoading(true);
     try {
-      const start = (page - 1) * PAGE_SIZE;
-      const end = start + PAGE_SIZE - 1;
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
       const { data, count: c, error } = await buildQuery().range(start, end);
       if (error) throw error;
       setRows((data as Row[]) ?? []);
@@ -91,7 +101,7 @@ export default function Attendance() {
   useEffect(() => {
     fetchPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, department, from, to, sortKey, sortDir]);
+  }, [page, pageSize, search, teacherName, department, from, to, status, lateOnly, earlyOnly, sortKey, sortDir]);
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -104,6 +114,10 @@ export default function Attendance() {
 
   const applySearch = () => {
     setSearch(searchInput.trim());
+    setPage(1);
+  };
+  const applyTeacher = () => {
+    setTeacherName(teacherInput.trim());
     setPage(1);
   };
 
@@ -126,7 +140,7 @@ export default function Attendance() {
         all.map((r) => ({
           No: r.record_number,
           "Employee ID": r.employee_id,
-          "First Name": r.first_name,
+          "Teacher Name": r.first_name,
           Department: r.department,
           Date: r.attendance_date,
           Weekday: r.weekday,
@@ -150,19 +164,28 @@ export default function Attendance() {
   };
 
   const pageInfo = useMemo(() => {
-    const start = count === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-    const end = Math.min(page * PAGE_SIZE, count);
+    const start = count === 0 ? 0 : (page - 1) * pageSize + 1;
+    const end = Math.min(page * pageSize, count);
     return `${start.toLocaleString()}–${end.toLocaleString()} of ${count.toLocaleString()}`;
-  }, [page, count]);
+  }, [page, pageSize, count]);
+
+  const resetFilters = () => {
+    setSearch(""); setSearchInput("");
+    setTeacherName(""); setTeacherInput("");
+    setDepartment("all"); setFrom(""); setTo("");
+    setStatus("all"); setLateOnly("all"); setEarlyOnly("all");
+    setPage(1);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h2 className="page-title">Attendance Records</h2>
-          <p className="text-sm text-muted-foreground">{count.toLocaleString()} total records</p>
+          <p className="text-sm text-muted-foreground">{count.toLocaleString()} matching records</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
           <Button variant="outline" size="sm" onClick={fetchPage} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
             Refresh
@@ -174,20 +197,29 @@ export default function Attendance() {
         </div>
       </div>
 
-      <Card className="shadow-card border-border/60 p-4">
-        <div className="grid gap-3 md:grid-cols-5">
-          <div className="md:col-span-2 flex gap-2">
+      <Card className="shadow-card border-border/60 p-4 space-y-3">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search Employee ID or Name"
+                placeholder="Employee ID or Name"
                 className="pl-9"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applySearch()}
               />
             </div>
-            <Button variant="secondary" onClick={applySearch}>Search</Button>
+            <Button variant="secondary" onClick={applySearch}>Go</Button>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Filter by Teacher Name"
+              value={teacherInput}
+              onChange={(e) => setTeacherInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyTeacher()}
+            />
+            <Button variant="secondary" onClick={applyTeacher}>Go</Button>
           </div>
           <Select value={department} onValueChange={(v) => { setDepartment(v); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
@@ -198,8 +230,40 @@ export default function Attendance() {
               ))}
             </SelectContent>
           </Select>
-          <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
-          <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
+          <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
+            <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="present">Present</SelectItem>
+              <SelectItem value="late">Late</SelectItem>
+              <SelectItem value="early_departure">Early Departure</SelectItem>
+              <SelectItem value="absent">Absent</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <div>
+            <label className="text-xs text-muted-foreground">From</label>
+            <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">To</label>
+            <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
+          </div>
+          <Select value={lateOnly} onValueChange={(v) => { setLateOnly(v); setPage(1); }}>
+            <SelectTrigger><SelectValue placeholder="Late filter" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All (Late filter)</SelectItem>
+              <SelectItem value="yes">Late only (&gt; 0 min)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={earlyOnly} onValueChange={(v) => { setEarlyOnly(v); setPage(1); }}>
+            <SelectTrigger><SelectValue placeholder="Early filter" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All (Early filter)</SelectItem>
+              <SelectItem value="yes">Early Dep. only (&gt; 0 min)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </Card>
 
@@ -212,7 +276,7 @@ export default function Attendance() {
                 <TableHead className="table-head">Employee ID</TableHead>
                 <TableHead className="table-head">
                   <button className="inline-flex items-center gap-1" onClick={() => toggleSort("first_name")}>
-                    First Name <ArrowUpDown className="h-3 w-3" />
+                    Teacher Name <ArrowUpDown className="h-3 w-3" />
                   </button>
                 </TableHead>
                 <TableHead className="table-head">Department</TableHead>
@@ -234,43 +298,43 @@ export default function Attendance() {
               {rows.length === 0 && !loading && (
                 <TableRow>
                   <TableCell colSpan={12} className="text-center text-muted-foreground py-10">
-                    No records. Upload an Excel file from “Upload Attendance”.
+                    No records match your filters.
                   </TableCell>
                 </TableRow>
               )}
-              {rows.map((r) => {
-                const tinted =
-                  r.status === "absent" || r.late_minutes > 0 || r.early_departure_minutes > 0
-                    ? "bg-row-late"
-                    : "bg-row-present";
-                return (
-                  <TableRow key={r.id} className={tinted}>
-                    <TableCell>{r.record_number ?? "—"}</TableCell>
-                    <TableCell className="font-medium">{r.employee_id}</TableCell>
-                    <TableCell>{r.first_name}</TableCell>
-                    <TableCell>{r.department ?? "—"}</TableCell>
-                    <TableCell>{r.attendance_date}</TableCell>
-                    <TableCell>{r.weekday ?? "—"}</TableCell>
-                    <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>
-                      {r.first_punch?.slice(0, 5) ?? "—"}
-                    </TableCell>
-                    <TableCell className={cn(r.early_departure_minutes > 0 && "text-danger font-semibold")}>
-                      {r.last_punch?.slice(0, 5) ?? "—"}
-                    </TableCell>
-                    <TableCell>{r.total_time ?? "—"}</TableCell>
-                    <TableCell>{r.late_minutes}</TableCell>
-                    <TableCell>{r.early_departure_minutes}</TableCell>
-                    <TableCell><StatusBadge status={r.status} /></TableCell>
-                  </TableRow>
-                );
-              })}
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.record_number ?? "—"}</TableCell>
+                  <TableCell className="font-medium">{r.employee_id}</TableCell>
+                  <TableCell>{r.first_name}</TableCell>
+                  <TableCell>{r.department ?? "—"}</TableCell>
+                  <TableCell>{r.attendance_date}</TableCell>
+                  <TableCell>{r.weekday ?? "—"}</TableCell>
+                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>
+                    {r.first_punch?.slice(0, 5) ?? "—"}
+                  </TableCell>
+                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-danger font-semibold")}>
+                    {r.last_punch?.slice(0, 5) ?? "—"}
+                  </TableCell>
+                  <TableCell>{r.total_time ?? "—"}</TableCell>
+                  <TableCell>{r.late_minutes}</TableCell>
+                  <TableCell>{r.early_departure_minutes}</TableCell>
+                  <TableCell><StatusBadge status={r.status} /></TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>
 
-        <div className="flex items-center justify-between p-4 border-t border-border">
+        <div className="flex items-center justify-between p-4 border-t border-border flex-wrap gap-3">
           <div className="text-sm text-muted-foreground">{pageInfo}</div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+              <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map((s) => <SelectItem key={s} value={String(s)}>{s} / page</SelectItem>)}
+              </SelectContent>
+            </Select>
             <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage(1)}>First</Button>
             <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>Prev</Button>
             <span className="text-sm font-medium">Page {page} / {totalPages}</span>
@@ -288,7 +352,7 @@ function StatusBadge({ status }: { status: string }) {
     present: { label: "Present", cls: "bg-success/15 text-success border-success/30" },
     late: { label: "Late", cls: "bg-danger/15 text-danger border-danger/30" },
     absent: { label: "Absent", cls: "bg-muted text-muted-foreground border-border" },
-    early_departure: { label: "Early Dep.", cls: "bg-danger/15 text-danger border-danger/30" },
+    early_departure: { label: "Early Dep.", cls: "bg-accent/20 text-accent-foreground border-accent/40" },
   };
   const v = map[status] ?? map.present;
   return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
