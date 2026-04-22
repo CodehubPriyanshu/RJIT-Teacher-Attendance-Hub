@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowUpDown, Download, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
 
 interface Row {
   id: string;
@@ -185,6 +186,7 @@ export default function Attendance() {
           <p className="text-sm text-muted-foreground">{count.toLocaleString()} matching records</p>
         </div>
         <div className="flex gap-2">
+          <UploadAttendanceDialog onUploaded={() => { setPage(1); fetchPage(); fetchDepartments(); }} />
           <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
           <Button variant="outline" size="sm" onClick={fetchPage} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
