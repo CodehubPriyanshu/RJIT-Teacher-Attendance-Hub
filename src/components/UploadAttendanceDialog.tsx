@@ -274,7 +274,9 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       let done = 0;
       for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE);
-        const { error } = await supabase.from("attendance_records").insert(batch);
+        const { error } = await supabase
+          .from("attendance_records")
+          .upsert(batch, { onConflict: "employee_id,first_name,attendance_date" });
         if (error) throw error;
         done += batch.length;
         setProgress(Math.round((done / total) * 100));
