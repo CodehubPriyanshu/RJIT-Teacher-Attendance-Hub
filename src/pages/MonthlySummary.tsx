@@ -16,12 +16,10 @@ interface Agg {
   department: string | null;
   month: number;
   year: number;
-  working: number;
-  present: number;
-  absent: number;
-  late: number;
-  early: number;
-  pct: number;
+  working: number;        // distinct attendance dates
+  totalLate: number;      // sum of late_minutes
+  totalEarly: number;     // sum of early_departure_minutes
+  pct: number;            // avg attendance %
 }
 
 const months = [
@@ -30,6 +28,7 @@ const months = [
 ];
 const PAGE_SIZES = [10, 25, 50, 100];
 const FETCH_PAGE = 1000;
+const MINUTES_PER_DAY = 480; // 8 hours
 
 export default function MonthlySummary() {
   const now = new Date();
@@ -52,12 +51,13 @@ export default function MonthlySummary() {
       const endDate = new Date(y, m, 0).getDate();
       const end = `${y}-${String(m).padStart(2, "0")}-${String(endDate).padStart(2, "0")}`;
 
+      // Fetch all attendance records for the period
       const all: any[] = [];
       let offset = 0;
       while (true) {
         let q = supabase
           .from("attendance_records")
-          .select("employee_id, first_name, department, attendance_date, status, late_minutes, early_departure_minutes, first_punch, last_punch")
+          .select("employee_id, first_name, department, attendance_date, late_minutes, early_departure_minutes")
           .gte("attendance_date", start)
           .lte("attendance_date", end);
         if (department !== "all") q = q.eq("department", department);
@@ -70,38 +70,57 @@ export default function MonthlySummary() {
         if (all.length >= 200000) break;
       }
 
-      // Dedupe per (employee, date)
-      const dayMap = new Map<string, any>();
-      for (const r of all) {
-        const k = `${r.employee_id}|${r.attendance_date}`;
-        const existing = dayMap.get(k);
-        if (!existing) dayMap.set(k, r);
-        else if (existing.status === "absent" && r.status !== "absent") dayMap.set(k, r);
-      }
+      // Fetch teachers to resolve department from DB by employee_id
+      const { data: teachers } = await supabase
+        .from("teachers")
+        .select("employee_id, department, name");
+      const teacherMap = new Map<string, { department: string | null; name: string }>();
+      (teachers ?? []).forEach((t: any) => {
+        teacherMap.set(t.employee_id, { department: t.department, name: t.name });
+      });
 
-      const map = new Map<string, Agg>();
-      for (const r of dayMap.values()) {
+      // Aggregate per employee with distinct dates
+      const map = new Map<string, Agg & { _dates: Set<string> }>();
+      for (const r of all) {
         const key = r.employee_id;
         if (!map.has(key)) {
+          const t = teacherMap.get(r.employee_id);
           map.set(key, {
             employee_id: r.employee_id,
             name: r.first_name,
-            department: r.department,
+            department: t?.department ?? r.department ?? null,
             month: m,
             year: y,
-            working: 0, present: 0, absent: 0, late: 0, early: 0, pct: 0,
+            working: 0,
+            totalLate: 0,
+            totalEarly: 0,
+            pct: 0,
+            _dates: new Set<string>(),
           });
         }
         const a = map.get(key)!;
-        a.working++;
-        const hasBoth = !!r.first_punch && !!r.last_punch;
-        if (r.status === "absent" || !hasBoth) a.absent++;
-        else a.present++;
-        if ((r.late_minutes ?? 0) > 0) a.late++;
-        if ((r.early_departure_minutes ?? 0) > 0) a.early++;
+        a._dates.add(r.attendance_date);
+        a.totalLate += r.late_minutes ?? 0;
+        a.totalEarly += r.early_departure_minutes ?? 0;
       }
-      const list = Array.from(map.values());
-      list.forEach((a) => { a.pct = a.working ? +(a.present / a.working * 100).toFixed(1) : 0; });
+
+      const list: Agg[] = Array.from(map.values()).map((a) => {
+        const working = a._dates.size;
+        const maxMin = working * MINUTES_PER_DAY;
+        const delay = a.totalLate + a.totalEarly;
+        const pct = maxMin > 0 ? Math.max(0, 100 - (delay / maxMin) * 100) : 0;
+        return {
+          employee_id: a.employee_id,
+          name: a.name,
+          department: a.department,
+          month: a.month,
+          year: a.year,
+          working,
+          totalLate: a.totalLate,
+          totalEarly: a.totalEarly,
+          pct: +pct.toFixed(2),
+        };
+      });
       list.sort((a, b) => a.name.localeCompare(b.name));
       setData(list);
       setPage(1);
@@ -114,10 +133,9 @@ export default function MonthlySummary() {
 
   const loadDepartments = async () => {
     const { data } = await supabase
-      .from("attendance_records")
+      .from("teachers")
       .select("department")
-      .not("department", "is", null)
-      .limit(1000);
+      .not("department", "is", null);
     const set = new Set<string>();
     (data ?? []).forEach((r: any) => r.department && set.add(r.department));
     setDepartments(Array.from(set).sort());
@@ -145,17 +163,15 @@ export default function MonthlySummary() {
   const exportXlsx = () => {
     const ws = XLSX.utils.json_to_sheet(
       filtered.map((r) => ({
-        "Teacher Name": r.name,
         "Employee ID": r.employee_id,
+        "Teacher Name": r.name,
         "Department": r.department ?? "",
         "Month": months[r.month - 1],
         "Year": r.year,
         "Working Days": r.working,
-        "Present Days": r.present,
-        "Absent Days": r.absent,
-        "Late Days": r.late,
-        "Early Departure Days": r.early,
-        "Average Attendance %": r.pct,
+        "Total Late (Min)": r.totalLate,
+        "Total Early Dep. (Min)": r.totalEarly,
+        "Avg (%)": r.pct.toFixed(2),
       })),
     );
     const wb = XLSX.utils.book_new();
@@ -211,7 +227,7 @@ export default function MonthlySummary() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search Teacher Name"
+              placeholder="Search Employee ID or Name"
               className="pl-9"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -225,44 +241,42 @@ export default function MonthlySummary() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
+                <TableHead className="table-head">Employee ID</TableHead>
                 <TableHead className="table-head">Teacher Name</TableHead>
                 <TableHead className="table-head">Department</TableHead>
                 <TableHead className="table-head">Month</TableHead>
                 <TableHead className="table-head">Year</TableHead>
                 <TableHead className="table-head">Working Days</TableHead>
-                <TableHead className="table-head">Present</TableHead>
-                <TableHead className="table-head">Absent</TableHead>
-                <TableHead className="table-head">Late</TableHead>
-                <TableHead className="table-head">Early Dep.</TableHead>
-                <TableHead className="table-head">Avg %</TableHead>
+                <TableHead className="table-head">Total Late (Min)</TableHead>
+                <TableHead className="table-head">Total Early Dep. (Min)</TableHead>
+                <TableHead className="table-head">Avg (%)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {pageRows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
                     No data for selected month.
                   </TableCell>
                 </TableRow>
               )}
               {pageRows.map((r) => (
                 <TableRow key={r.employee_id}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="font-medium">{r.employee_id}</TableCell>
+                  <TableCell>{r.name}</TableCell>
                   <TableCell>{r.department ?? "—"}</TableCell>
                   <TableCell>{months[r.month - 1]}</TableCell>
                   <TableCell>{r.year}</TableCell>
                   <TableCell>{r.working}</TableCell>
-                  <TableCell className="text-success font-semibold">{r.present}</TableCell>
-                  <TableCell className="text-danger font-semibold">{r.absent}</TableCell>
-                  <TableCell>{r.late}</TableCell>
-                  <TableCell>{r.early}</TableCell>
+                  <TableCell className={cn(r.totalLate > 0 && "text-danger font-semibold")}>{r.totalLate}</TableCell>
+                  <TableCell className={cn(r.totalEarly > 0 && "text-warning font-semibold")}>{r.totalEarly}</TableCell>
                   <TableCell>
                     <span className={cn(
                       "px-2 py-0.5 rounded font-semibold",
                       r.pct >= 90 ? "bg-success/15 text-success" :
                       r.pct >= 75 ? "bg-accent/20 text-accent-foreground" :
                       "bg-danger/15 text-danger",
-                    )}>{r.pct}%</span>
+                    )}>{r.pct.toFixed(2)}%</span>
                   </TableCell>
                 </TableRow>
               ))}
