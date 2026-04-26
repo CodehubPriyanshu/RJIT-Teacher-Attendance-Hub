@@ -129,6 +129,8 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
     Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>,
   );
   const [needsManualMap, setNeedsManualMap] = useState(false);
+  const [headerRowIdx, setHeaderRowIdx] = useState(0);
+  const [totalDetected, setTotalDetected] = useState(0);
 
   const reset = () => {
     setFile(null);
@@ -139,11 +141,17 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
     setPresentKeys([]);
     setMapping(Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>);
     setNeedsManualMap(false);
+    setHeaderRowIdx(0);
+    setTotalDetected(0);
     if (inputRef.current) inputRef.current.value = "";
   };
 
   const buildRowsFromMapping = useCallback(
-    (json: Record<string, unknown>[], map: Record<RequiredField, string>) => {
+    (
+      json: Record<string, unknown>[],
+      map: Record<RequiredField, string>,
+      headerRowIdx = 0,
+    ) => {
       const get = (r: Record<string, unknown>, field: RequiredField) => {
         const key = map[field];
         return key ? r[key] : undefined;
@@ -151,11 +159,21 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       const parsed: ParsedRow[] = [];
       const issues: string[] = [];
       json.forEach((r, idx) => {
+        const excelRow = headerRowIdx + 2 + idx;
         const empId = String(get(r, "Employee ID") ?? "").trim();
         const firstName = String(get(r, "First Name") ?? "").trim();
-        const dateStr = toDateStr(get(r, "Date"));
-        if (!empId || !firstName || !dateStr) {
-          if (issues.length < 5) issues.push(`Row ${idx + 2}: missing Employee ID, First Name, or Date`);
+        const dateRaw = get(r, "Date");
+        const dateStr = toDateStr(dateRaw);
+        if (!empId) {
+          issues.push(`Skipped row ${excelRow}: Missing Employee ID`);
+          return;
+        }
+        if (!firstName) {
+          issues.push(`Skipped row ${excelRow}: Missing First Name`);
+          return;
+        }
+        if (!dateStr) {
+          issues.push(`Skipped row ${excelRow}: Invalid date format`);
           return;
         }
         const fp = toMinutes(get(r, "First Punch"));
@@ -196,12 +214,27 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         const buf = await f.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array", cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
+
+        // Force-extend the sheet range so trailing rows are not dropped
+        const refRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+        let maxRow = refRange ? refRange.e.r : 0;
+        let maxCol = refRange ? refRange.e.c : 0;
+        Object.keys(ws).forEach((addr) => {
+          if (addr.startsWith("!")) return;
+          const { r, c } = XLSX.utils.decode_cell(addr);
+          if (r > maxRow) maxRow = r;
+          if (c > maxCol) maxCol = c;
+        });
+        ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } });
+
         const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, {
           header: 1,
           defval: null,
           raw: true,
-          blankrows: false,
+          blankrows: true,
         });
+
+        console.log("[UploadAttendance] Total rows detected in file:", matrix.length);
 
         if (matrix.length === 0) {
           setErrors(["Sheet is empty."]);
@@ -210,7 +243,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
 
         // Scan first 15 rows to detect the header row
         const SCAN_LIMIT = Math.min(15, matrix.length);
-        let headerRowIdx = -1;
+        let detectedHeaderIdx = -1;
         let bestMatches = 0;
         let bestMap: Record<RequiredField, string> = Object.fromEntries(
           REQUIRED_FIELDS.map((f) => [f, ""]),
@@ -233,32 +266,40 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           const matches = REQUIRED_FIELDS.filter((f) => rowMap[f]).length;
           if (matches > bestMatches) {
             bestMatches = matches;
-            headerRowIdx = i;
+            detectedHeaderIdx = i;
             bestMap = rowMap;
             bestKeys = cellKeys;
           }
           if (matches === REQUIRED_FIELDS.length) break;
         }
 
-        console.log("[UploadAttendance] Detected header row (1-indexed):", headerRowIdx + 1);
+        console.log("[UploadAttendance] Detected header row (1-indexed):", detectedHeaderIdx + 1);
         console.log("[UploadAttendance] Detected columns:", bestKeys);
         console.log("[UploadAttendance] Auto mapping:", bestMap);
 
-        if (headerRowIdx === -1) {
+        if (detectedHeaderIdx === -1) {
           setErrors(["Could not detect a header row in the first 15 rows."]);
           return;
         }
 
-        // Build JSON rows from detected header row
-        const headerRow = matrix[headerRowIdx] || [];
+        // Build JSON rows from detected header row.
+        // Stop rule: only skip rows where ALL columns are empty.
+        const headerRow = matrix[detectedHeaderIdx] || [];
         const keys: string[] = headerRow.map((cell, colIdx) => {
           const raw = String(cell ?? "").trim();
           return raw ? `${raw}__${colIdx}` : `__col_${colIdx}`;
         });
         const json: Record<string, unknown>[] = [];
-        for (let i = headerRowIdx + 1; i < matrix.length; i++) {
+        let blankSkipped = 0;
+        for (let i = detectedHeaderIdx + 1; i < matrix.length; i++) {
           const row = matrix[i] || [];
-          if (row.every((c) => c === null || c === undefined || String(c).trim() === "")) continue;
+          const allEmpty = row.length === 0 || row.every(
+            (c) => c === null || c === undefined || String(c).trim() === "",
+          );
+          if (allEmpty) {
+            blankSkipped++;
+            continue;
+          }
           const obj: Record<string, unknown> = {};
           keys.forEach((k, idx) => {
             obj[k] = row[idx] ?? null;
@@ -266,6 +307,10 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           json.push(obj);
         }
 
+        console.log("[UploadAttendance] Data rows after header:", json.length, "| blank rows skipped:", blankSkipped);
+
+        setHeaderRowIdx(detectedHeaderIdx);
+        setTotalDetected(matrix.length);
         setRawJson(json);
         setPresentKeys(keys);
         const autoMap = bestMap;
@@ -288,9 +333,10 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           return;
         }
 
-        const { parsed, issues } = buildRowsFromMapping(json, autoMap);
+        const { parsed, issues } = buildRowsFromMapping(json, autoMap, detectedHeaderIdx);
         setRows(parsed);
         setErrors(issues);
+        console.log("[UploadAttendance] Parsed valid rows:", parsed.length, "| Skipped during validation:", issues.length);
         if (parsed.length === 0) {
           toast.error("No valid rows found in the file");
         } else {
@@ -311,7 +357,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       toast.error(`Still missing: ${missing.join(", ")}`);
       return;
     }
-    const { parsed, issues } = buildRowsFromMapping(rawJson, mapping);
+    const { parsed, issues } = buildRowsFromMapping(rawJson, mapping, headerRowIdx);
     setRows(parsed);
     setErrors(issues);
     setNeedsManualMap(false);
@@ -342,7 +388,11 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         done += batch.length;
         setProgress(Math.round((done / total) * 100));
       }
-      toast.success(`Uploaded ${total.toLocaleString()} records`);
+      const detected = Math.max(0, totalDetected - (headerRowIdx + 1));
+      const skipped = Math.max(0, detected - total);
+      toast.success(
+        `File uploaded successfully\nTotal rows detected: ${detected}\nTotal rows imported: ${total}\nSkipped rows: ${skipped}`,
+      );
       onUploaded?.();
       setOpen(false);
       reset();
@@ -520,23 +570,29 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50">
-                      <TableHead className="table-head">Emp ID</TableHead>
-                      <TableHead className="table-head">Name</TableHead>
+                      <TableHead className="table-head">No</TableHead>
+                      <TableHead className="table-head">Employee ID</TableHead>
+                      <TableHead className="table-head">First Name</TableHead>
+                      <TableHead className="table-head">Department</TableHead>
                       <TableHead className="table-head">Date</TableHead>
-                      <TableHead className="table-head">In</TableHead>
-                      <TableHead className="table-head">Out</TableHead>
-                      <TableHead className="table-head">Status</TableHead>
+                      <TableHead className="table-head">Weekday</TableHead>
+                      <TableHead className="table-head">First Punch</TableHead>
+                      <TableHead className="table-head">Last Punch</TableHead>
+                      <TableHead className="table-head">Total Time</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.slice(0, 5).map((r, i) => (
                       <TableRow key={i}>
+                        <TableCell>{r.record_number ?? "—"}</TableCell>
                         <TableCell className="font-medium">{r.employee_id}</TableCell>
                         <TableCell>{r.first_name}</TableCell>
+                        <TableCell>{r.department ?? "—"}</TableCell>
                         <TableCell>{r.attendance_date}</TableCell>
+                        <TableCell>{r.weekday ?? "—"}</TableCell>
                         <TableCell>{r.first_punch?.slice(0, 5) ?? "—"}</TableCell>
                         <TableCell>{r.last_punch?.slice(0, 5) ?? "—"}</TableCell>
-                        <TableCell>{r.status}</TableCell>
+                        <TableCell>{r.total_time ?? "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
