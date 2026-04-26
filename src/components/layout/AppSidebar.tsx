@@ -2,7 +2,6 @@ import { NavLink as RRNavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   ClipboardList,
-  CalendarDays,
   LogOut,
   GraduationCap,
   PartyPopper,
@@ -13,7 +12,6 @@ import { useAuth } from "@/hooks/useAuth";
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/attendance", label: "Attendance Records", icon: ClipboardList },
-  { to: "/monthly", label: "Monthly Summary", icon: CalendarDays },
   { to: "/holidays", label: "Holiday and Working Days", icon: PartyPopper },
 ];
 
