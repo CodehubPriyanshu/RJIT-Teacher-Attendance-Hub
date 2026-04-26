@@ -139,50 +139,6 @@ export type Database = {
         }
         Relationships: []
       }
-      monthly_summary: {
-        Row: {
-          created_at: string
-          id: string
-          month: number
-          teacher_id: string
-          total_absent_days: number
-          total_early_departure_minutes: number
-          total_late_minutes: number
-          total_working_days: number
-          year: number
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          month: number
-          teacher_id: string
-          total_absent_days?: number
-          total_early_departure_minutes?: number
-          total_late_minutes?: number
-          total_working_days?: number
-          year: number
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          month?: number
-          teacher_id?: string
-          total_absent_days?: number
-          total_early_departure_minutes?: number
-          total_late_minutes?: number
-          total_working_days?: number
-          year?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "monthly_summary_teacher_id_fkey"
-            columns: ["teacher_id"]
-            isOneToOne: false
-            referencedRelation: "teachers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       settings: {
         Row: {
           departure_time: string
