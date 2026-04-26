@@ -352,3 +352,39 @@ function StatusBadge({ status }: { status: string }) {
   const v = map[status] ?? map.present;
   return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
 }
+
+function SortHeader({
+  label, col, sortKey, sortDir, setSort,
+}: {
+  label: string;
+  col: SortKey;
+  sortKey: SortKey;
+  sortDir: "asc" | "desc";
+  setSort: (k: SortKey, dir: "asc" | "desc") => void;
+}) {
+  const activeAsc = sortKey === col && sortDir === "asc";
+  const activeDesc = sortKey === col && sortDir === "desc";
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <span className="inline-flex flex-col leading-none">
+        <button
+          type="button"
+          aria-label={`Sort ${label} ascending`}
+          onClick={() => setSort(col, "asc")}
+          className={cn("hover:text-foreground", activeAsc ? "text-primary" : "text-muted-foreground")}
+        >
+          <ArrowUp className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Sort ${label} descending`}
+          onClick={() => setSort(col, "desc")}
+          className={cn("hover:text-foreground", activeDesc ? "text-primary" : "text-muted-foreground")}
+        >
+          <ArrowDown className="h-3 w-3" />
+        </button>
+      </span>
+    </span>
+  );
+}
