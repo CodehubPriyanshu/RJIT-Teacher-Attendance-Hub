@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, Download, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
-import { buildSummary, type ComputedStatus } from "@/lib/attendanceCalc";
+import { formatMinutes, shortSummary } from "@/lib/timeFormat";
 
 interface Row {
   id: string;
@@ -30,7 +30,7 @@ interface Row {
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
-type SortKey = "attendance_date" | "first_name";
+type SortKey = "attendance_date" | "first_name" | "employee_id" | "record_number";
 
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -105,12 +105,14 @@ export default function Attendance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, teacherName, department, from, to, status, lateOnly, earlyOnly, sortKey, sortDir]);
 
+  const setSort = (k: SortKey, dir: "asc" | "desc") => {
+    setSortKey(k);
+    setSortDir(dir);
+    setPage(1);
+  };
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else {
-      setSortKey(k);
-      setSortDir("asc");
-    }
+    else { setSortKey(k); setSortDir("asc"); }
     setPage(1);
   };
 
@@ -149,10 +151,10 @@ export default function Attendance() {
           "First Punch": r.first_punch?.slice(0, 5) ?? "",
           "Last Punch": r.last_punch?.slice(0, 5) ?? "",
           "Total Time": r.total_time ?? "",
-          "Late (Min)": r.late_minutes,
-          "Early Dep. (Min)": r.early_departure_minutes,
-          Summary: buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus),
+          "Late (Min)": formatMinutes(r.late_minutes),
+          "Early Dep. (Min)": formatMinutes(r.early_departure_minutes),
           Status: r.status,
+          Summary: shortSummary(r.late_minutes, r.early_departure_minutes, r.status),
         })),
       );
       const wb = XLSX.utils.book_new();
@@ -172,14 +174,6 @@ export default function Attendance() {
     return `${start.toLocaleString()}–${end.toLocaleString()} of ${count.toLocaleString()}`;
   }, [page, pageSize, count]);
 
-  const resetFilters = () => {
-    setSearch(""); setSearchInput("");
-    setTeacherName(""); setTeacherInput("");
-    setDepartment("all"); setFrom(""); setTo("");
-    setStatus("all"); setLateOnly("all"); setEarlyOnly("all");
-    setPage(1);
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-3">
@@ -189,11 +183,6 @@ export default function Attendance() {
         </div>
         <div className="flex gap-2">
           <UploadAttendanceDialog onUploaded={() => { setPage(1); fetchPage(); fetchDepartments(); }} />
-          <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
-          <Button variant="outline" size="sm" onClick={fetchPage} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-            Refresh
-          </Button>
           <Button size="sm" onClick={handleExport} disabled={exporting || count === 0}>
             <Download className="h-4 w-4 mr-2" />
             {exporting ? "Exporting…" : "Export Excel"}
