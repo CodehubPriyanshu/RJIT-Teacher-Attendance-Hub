@@ -196,23 +196,84 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         const buf = await f.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array", cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true });
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+          header: 1,
+          defval: null,
+          raw: true,
+          blankrows: false,
+        });
 
-        if (json.length === 0) {
+        if (matrix.length === 0) {
           setErrors(["Sheet is empty."]);
           return;
         }
 
-        const keys = Object.keys(json[0]);
+        // Scan first 15 rows to detect the header row
+        const SCAN_LIMIT = Math.min(15, matrix.length);
+        let headerRowIdx = -1;
+        let bestMatches = 0;
+        let bestMap: Record<RequiredField, string> = Object.fromEntries(
+          REQUIRED_FIELDS.map((f) => [f, ""]),
+        ) as Record<RequiredField, string>;
+        let bestKeys: string[] = [];
+
+        for (let i = 0; i < SCAN_LIMIT; i++) {
+          const row = matrix[i] || [];
+          const rowMap = Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>;
+          const cellKeys: string[] = [];
+          row.forEach((cell, colIdx) => {
+            const raw = String(cell ?? "").trim();
+            if (!raw) return;
+            const colKey = `${raw}__${colIdx}`;
+            cellKeys.push(colKey);
+            const norm = normalizeHeader(raw);
+            const field = HEADER_ALIASES[norm];
+            if (field && !rowMap[field]) rowMap[field] = colKey;
+          });
+          const matches = REQUIRED_FIELDS.filter((f) => rowMap[f]).length;
+          if (matches > bestMatches) {
+            bestMatches = matches;
+            headerRowIdx = i;
+            bestMap = rowMap;
+            bestKeys = cellKeys;
+          }
+          if (matches === REQUIRED_FIELDS.length) break;
+        }
+
+        console.log("[UploadAttendance] Detected header row (1-indexed):", headerRowIdx + 1);
+        console.log("[UploadAttendance] Detected columns:", bestKeys);
+        console.log("[UploadAttendance] Auto mapping:", bestMap);
+
+        if (headerRowIdx === -1) {
+          setErrors(["Could not detect a header row in the first 15 rows."]);
+          return;
+        }
+
+        // Build JSON rows from detected header row
+        const headerRow = matrix[headerRowIdx] || [];
+        const keys: string[] = headerRow.map((cell, colIdx) => {
+          const raw = String(cell ?? "").trim();
+          return raw ? `${raw}__${colIdx}` : `__col_${colIdx}`;
+        });
+        const json: Record<string, unknown>[] = [];
+        for (let i = headerRowIdx + 1; i < matrix.length; i++) {
+          const row = matrix[i] || [];
+          if (row.every((c) => c === null || c === undefined || String(c).trim() === "")) continue;
+          const obj: Record<string, unknown> = {};
+          keys.forEach((k, idx) => {
+            obj[k] = row[idx] ?? null;
+          });
+          json.push(obj);
+        }
+
         setRawJson(json);
         setPresentKeys(keys);
-
-        const autoMap = Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>;
-        for (const k of keys) {
-          const norm = normalizeHeader(k);
-          const field = HEADER_ALIASES[norm];
-          if (field && !autoMap[field]) autoMap[field] = k;
-        }
+        const autoMap = bestMap;
+        console.log("[UploadAttendance] Mapping status:", {
+          mapped: REQUIRED_FIELDS.filter((f) => autoMap[f]),
+          missing: REQUIRED_FIELDS.filter((f) => !autoMap[f]),
+          dataRows: json.length,
+        });
 
         const missing = REQUIRED_FIELDS.filter((f) => !autoMap[f]);
         setMapping(autoMap);
