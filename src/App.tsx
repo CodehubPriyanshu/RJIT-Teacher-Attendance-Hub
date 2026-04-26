@@ -9,8 +9,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
-import MonthlySummary from "./pages/MonthlySummary";
 import Holidays from "./pages/Holidays";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -32,8 +32,8 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<Shell><Dashboard /></Shell>} />
             <Route path="/attendance" element={<Shell><Attendance /></Shell>} />
-            <Route path="/monthly" element={<Shell><MonthlySummary /></Shell>} />
             <Route path="/holidays" element={<Shell><Holidays /></Shell>} />
+            <Route path="/profile" element={<Shell><Profile /></Shell>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

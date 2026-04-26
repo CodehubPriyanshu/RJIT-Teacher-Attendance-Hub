@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, Download, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
-import { buildSummary, type ComputedStatus } from "@/lib/attendanceCalc";
+import { formatMinutes, shortSummary } from "@/lib/timeFormat";
 
 interface Row {
   id: string;
@@ -30,7 +30,7 @@ interface Row {
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
-type SortKey = "attendance_date" | "first_name";
+type SortKey = "attendance_date" | "first_name" | "employee_id" | "record_number";
 
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -105,12 +105,14 @@ export default function Attendance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, teacherName, department, from, to, status, lateOnly, earlyOnly, sortKey, sortDir]);
 
+  const setSort = (k: SortKey, dir: "asc" | "desc") => {
+    setSortKey(k);
+    setSortDir(dir);
+    setPage(1);
+  };
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else {
-      setSortKey(k);
-      setSortDir("asc");
-    }
+    else { setSortKey(k); setSortDir("asc"); }
     setPage(1);
   };
 
@@ -149,10 +151,10 @@ export default function Attendance() {
           "First Punch": r.first_punch?.slice(0, 5) ?? "",
           "Last Punch": r.last_punch?.slice(0, 5) ?? "",
           "Total Time": r.total_time ?? "",
-          "Late (Min)": r.late_minutes,
-          "Early Dep. (Min)": r.early_departure_minutes,
-          Summary: buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus),
+          "Late (Min)": formatMinutes(r.late_minutes),
+          "Early Dep. (Min)": formatMinutes(r.early_departure_minutes),
           Status: r.status,
+          Summary: shortSummary(r.late_minutes, r.early_departure_minutes, r.status),
         })),
       );
       const wb = XLSX.utils.book_new();
@@ -172,14 +174,6 @@ export default function Attendance() {
     return `${start.toLocaleString()}–${end.toLocaleString()} of ${count.toLocaleString()}`;
   }, [page, pageSize, count]);
 
-  const resetFilters = () => {
-    setSearch(""); setSearchInput("");
-    setTeacherName(""); setTeacherInput("");
-    setDepartment("all"); setFrom(""); setTo("");
-    setStatus("all"); setLateOnly("all"); setEarlyOnly("all");
-    setPage(1);
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-3">
@@ -189,11 +183,6 @@ export default function Attendance() {
         </div>
         <div className="flex gap-2">
           <UploadAttendanceDialog onUploaded={() => { setPage(1); fetchPage(); fetchDepartments(); }} />
-          <Button variant="outline" size="sm" onClick={resetFilters}>Reset</Button>
-          <Button variant="outline" size="sm" onClick={fetchPage} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-            Refresh
-          </Button>
           <Button size="sm" onClick={handleExport} disabled={exporting || count === 0}>
             <Download className="h-4 w-4 mr-2" />
             {exporting ? "Exporting…" : "Export Excel"}
@@ -277,13 +266,9 @@ export default function Attendance() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
-                <TableHead className="table-head">No</TableHead>
-                <TableHead className="table-head">Employee ID</TableHead>
-                <TableHead className="table-head">
-                  <button className="inline-flex items-center gap-1" onClick={() => toggleSort("first_name")}>
-                    Teacher Name <ArrowUpDown className="h-3 w-3" />
-                  </button>
-                </TableHead>
+                <TableHead className="table-head"><SortHeader label="No" col="record_number" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
+                <TableHead className="table-head"><SortHeader label="Employee ID" col="employee_id" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
+                <TableHead className="table-head"><SortHeader label="Teacher Name" col="first_name" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
                 <TableHead className="table-head">Department</TableHead>
                 <TableHead className="table-head">
                   <button className="inline-flex items-center gap-1" onClick={() => toggleSort("attendance_date")}>
@@ -296,8 +281,8 @@ export default function Attendance() {
                 <TableHead className="table-head">Total Time</TableHead>
                 <TableHead className="table-head">Late (Min)</TableHead>
                 <TableHead className="table-head">Early Dep. (Min)</TableHead>
-                <TableHead className="table-head">Summary</TableHead>
                 <TableHead className="table-head">Status</TableHead>
+                <TableHead className="table-head">Summary</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -323,12 +308,12 @@ export default function Attendance() {
                     {r.last_punch?.slice(0, 5) ?? "—"}
                   </TableCell>
                   <TableCell>{r.total_time ?? "—"}</TableCell>
-                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{r.late_minutes}</TableCell>
-                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{r.early_departure_minutes}</TableCell>
-                  <TableCell className="max-w-[260px] truncate" title={buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}>
-                    {buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}
-                  </TableCell>
+                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{formatMinutes(r.late_minutes)}</TableCell>
+                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{formatMinutes(r.early_departure_minutes)}</TableCell>
                   <TableCell><StatusBadge status={r.status} /></TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}>
+                    {shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -366,4 +351,40 @@ function StatusBadge({ status }: { status: string }) {
   };
   const v = map[status] ?? map.present;
   return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
+}
+
+function SortHeader({
+  label, col, sortKey, sortDir, setSort,
+}: {
+  label: string;
+  col: SortKey;
+  sortKey: SortKey;
+  sortDir: "asc" | "desc";
+  setSort: (k: SortKey, dir: "asc" | "desc") => void;
+}) {
+  const activeAsc = sortKey === col && sortDir === "asc";
+  const activeDesc = sortKey === col && sortDir === "desc";
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <span className="inline-flex flex-col leading-none">
+        <button
+          type="button"
+          aria-label={`Sort ${label} ascending`}
+          onClick={() => setSort(col, "asc")}
+          className={cn("hover:text-foreground", activeAsc ? "text-primary" : "text-muted-foreground")}
+        >
+          <ArrowUp className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Sort ${label} descending`}
+          onClick={() => setSort(col, "desc")}
+          className={cn("hover:text-foreground", activeDesc ? "text-primary" : "text-muted-foreground")}
+        >
+          <ArrowDown className="h-3 w-3" />
+        </button>
+      </span>
+    </span>
+  );
 }
