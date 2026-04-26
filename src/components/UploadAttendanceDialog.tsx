@@ -388,7 +388,11 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         done += batch.length;
         setProgress(Math.round((done / total) * 100));
       }
-      toast.success(`Uploaded ${total.toLocaleString()} records`);
+      const detected = Math.max(0, totalDetected - (headerRowIdx + 1));
+      const skipped = Math.max(0, detected - total);
+      toast.success(
+        `File uploaded successfully\nTotal rows detected: ${detected}\nTotal rows imported: ${total}\nSkipped rows: ${skipped}`,
+      );
       onUploaded?.();
       setOpen(false);
       reset();
