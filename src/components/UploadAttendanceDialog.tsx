@@ -486,7 +486,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
                         <SelectItem value={MANUAL_NONE}>— None —</SelectItem>
                         {presentKeys.map((k) => (
                           <SelectItem key={k} value={k}>
-                            {k}
+                            {labelOf(k)}
                           </SelectItem>
                         ))}
                       </SelectContent>
