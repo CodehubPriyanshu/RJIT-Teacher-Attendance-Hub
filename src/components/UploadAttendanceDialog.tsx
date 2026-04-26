@@ -129,6 +129,8 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
     Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>,
   );
   const [needsManualMap, setNeedsManualMap] = useState(false);
+  const [headerRowIdx, setHeaderRowIdx] = useState(0);
+  const [totalDetected, setTotalDetected] = useState(0);
 
   const reset = () => {
     setFile(null);
