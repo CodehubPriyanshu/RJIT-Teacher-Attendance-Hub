@@ -143,7 +143,11 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
   };
 
   const buildRowsFromMapping = useCallback(
-    (json: Record<string, unknown>[], map: Record<RequiredField, string>) => {
+    (
+      json: Record<string, unknown>[],
+      map: Record<RequiredField, string>,
+      headerRowIdx = 0,
+    ) => {
       const get = (r: Record<string, unknown>, field: RequiredField) => {
         const key = map[field];
         return key ? r[key] : undefined;
@@ -151,11 +155,21 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       const parsed: ParsedRow[] = [];
       const issues: string[] = [];
       json.forEach((r, idx) => {
+        const excelRow = headerRowIdx + 2 + idx;
         const empId = String(get(r, "Employee ID") ?? "").trim();
         const firstName = String(get(r, "First Name") ?? "").trim();
-        const dateStr = toDateStr(get(r, "Date"));
-        if (!empId || !firstName || !dateStr) {
-          if (issues.length < 5) issues.push(`Row ${idx + 2}: missing Employee ID, First Name, or Date`);
+        const dateRaw = get(r, "Date");
+        const dateStr = toDateStr(dateRaw);
+        if (!empId) {
+          issues.push(`Skipped row ${excelRow}: Missing Employee ID`);
+          return;
+        }
+        if (!firstName) {
+          issues.push(`Skipped row ${excelRow}: Missing First Name`);
+          return;
+        }
+        if (!dateStr) {
+          issues.push(`Skipped row ${excelRow}: Invalid date format`);
           return;
         }
         const fp = toMinutes(get(r, "First Punch"));
