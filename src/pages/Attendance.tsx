@@ -266,13 +266,9 @@ export default function Attendance() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
-                <TableHead className="table-head">No</TableHead>
-                <TableHead className="table-head">Employee ID</TableHead>
-                <TableHead className="table-head">
-                  <button className="inline-flex items-center gap-1" onClick={() => toggleSort("first_name")}>
-                    Teacher Name <ArrowUpDown className="h-3 w-3" />
-                  </button>
-                </TableHead>
+                <TableHead className="table-head"><SortHeader label="No" col="record_number" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
+                <TableHead className="table-head"><SortHeader label="Employee ID" col="employee_id" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
+                <TableHead className="table-head"><SortHeader label="Teacher Name" col="first_name" sortKey={sortKey} sortDir={sortDir} setSort={setSort} /></TableHead>
                 <TableHead className="table-head">Department</TableHead>
                 <TableHead className="table-head">
                   <button className="inline-flex items-center gap-1" onClick={() => toggleSort("attendance_date")}>
@@ -285,8 +281,8 @@ export default function Attendance() {
                 <TableHead className="table-head">Total Time</TableHead>
                 <TableHead className="table-head">Late (Min)</TableHead>
                 <TableHead className="table-head">Early Dep. (Min)</TableHead>
-                <TableHead className="table-head">Summary</TableHead>
                 <TableHead className="table-head">Status</TableHead>
+                <TableHead className="table-head">Summary</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -312,12 +308,12 @@ export default function Attendance() {
                     {r.last_punch?.slice(0, 5) ?? "—"}
                   </TableCell>
                   <TableCell>{r.total_time ?? "—"}</TableCell>
-                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{r.late_minutes}</TableCell>
-                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{r.early_departure_minutes}</TableCell>
-                  <TableCell className="max-w-[260px] truncate" title={buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}>
-                    {buildSummary(r.late_minutes, r.early_departure_minutes, r.status as ComputedStatus)}
-                  </TableCell>
+                  <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{formatMinutes(r.late_minutes)}</TableCell>
+                  <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{formatMinutes(r.early_departure_minutes)}</TableCell>
                   <TableCell><StatusBadge status={r.status} /></TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}>
+                    {shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
