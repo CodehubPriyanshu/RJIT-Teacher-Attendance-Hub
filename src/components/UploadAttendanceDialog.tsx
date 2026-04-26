@@ -141,6 +141,8 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
     setPresentKeys([]);
     setMapping(Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, ""])) as Record<RequiredField, string>);
     setNeedsManualMap(false);
+    setHeaderRowIdx(0);
+    setTotalDetected(0);
     if (inputRef.current) inputRef.current.value = "";
   };
 
