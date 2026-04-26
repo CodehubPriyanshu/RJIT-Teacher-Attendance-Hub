@@ -212,12 +212,27 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         const buf = await f.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array", cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
+
+        // Force-extend the sheet range so trailing rows are not dropped
+        const refRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+        let maxRow = refRange ? refRange.e.r : 0;
+        let maxCol = refRange ? refRange.e.c : 0;
+        Object.keys(ws).forEach((addr) => {
+          if (addr.startsWith("!")) return;
+          const { r, c } = XLSX.utils.decode_cell(addr);
+          if (r > maxRow) maxRow = r;
+          if (c > maxCol) maxCol = c;
+        });
+        ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } });
+
         const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, {
           header: 1,
           defval: null,
           raw: true,
-          blankrows: false,
+          blankrows: true,
         });
+
+        console.log("[UploadAttendance] Total rows detected in file:", matrix.length);
 
         if (matrix.length === 0) {
           setErrors(["Sheet is empty."]);
@@ -226,7 +241,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
 
         // Scan first 15 rows to detect the header row
         const SCAN_LIMIT = Math.min(15, matrix.length);
-        let headerRowIdx = -1;
+        let detectedHeaderIdx = -1;
         let bestMatches = 0;
         let bestMap: Record<RequiredField, string> = Object.fromEntries(
           REQUIRED_FIELDS.map((f) => [f, ""]),
@@ -249,32 +264,40 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           const matches = REQUIRED_FIELDS.filter((f) => rowMap[f]).length;
           if (matches > bestMatches) {
             bestMatches = matches;
-            headerRowIdx = i;
+            detectedHeaderIdx = i;
             bestMap = rowMap;
             bestKeys = cellKeys;
           }
           if (matches === REQUIRED_FIELDS.length) break;
         }
 
-        console.log("[UploadAttendance] Detected header row (1-indexed):", headerRowIdx + 1);
+        console.log("[UploadAttendance] Detected header row (1-indexed):", detectedHeaderIdx + 1);
         console.log("[UploadAttendance] Detected columns:", bestKeys);
         console.log("[UploadAttendance] Auto mapping:", bestMap);
 
-        if (headerRowIdx === -1) {
+        if (detectedHeaderIdx === -1) {
           setErrors(["Could not detect a header row in the first 15 rows."]);
           return;
         }
 
-        // Build JSON rows from detected header row
-        const headerRow = matrix[headerRowIdx] || [];
+        // Build JSON rows from detected header row.
+        // Stop rule: only skip rows where ALL columns are empty.
+        const headerRow = matrix[detectedHeaderIdx] || [];
         const keys: string[] = headerRow.map((cell, colIdx) => {
           const raw = String(cell ?? "").trim();
           return raw ? `${raw}__${colIdx}` : `__col_${colIdx}`;
         });
         const json: Record<string, unknown>[] = [];
-        for (let i = headerRowIdx + 1; i < matrix.length; i++) {
+        let blankSkipped = 0;
+        for (let i = detectedHeaderIdx + 1; i < matrix.length; i++) {
           const row = matrix[i] || [];
-          if (row.every((c) => c === null || c === undefined || String(c).trim() === "")) continue;
+          const allEmpty = row.length === 0 || row.every(
+            (c) => c === null || c === undefined || String(c).trim() === "",
+          );
+          if (allEmpty) {
+            blankSkipped++;
+            continue;
+          }
           const obj: Record<string, unknown> = {};
           keys.forEach((k, idx) => {
             obj[k] = row[idx] ?? null;
@@ -282,6 +305,10 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           json.push(obj);
         }
 
+        console.log("[UploadAttendance] Data rows after header:", json.length, "| blank rows skipped:", blankSkipped);
+
+        setHeaderRowIdx(detectedHeaderIdx);
+        setTotalDetected(matrix.length);
         setRawJson(json);
         setPresentKeys(keys);
         const autoMap = bestMap;
@@ -304,9 +331,10 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           return;
         }
 
-        const { parsed, issues } = buildRowsFromMapping(json, autoMap);
+        const { parsed, issues } = buildRowsFromMapping(json, autoMap, detectedHeaderIdx);
         setRows(parsed);
         setErrors(issues);
+        console.log("[UploadAttendance] Parsed valid rows:", parsed.length, "| Skipped during validation:", issues.length);
         if (parsed.length === 0) {
           toast.error("No valid rows found in the file");
         } else {
