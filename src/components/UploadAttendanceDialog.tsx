@@ -353,8 +353,9 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
     }
   };
 
+  const labelOf = (k: string) => k.replace(/__\d+$/, "");
   const detectedNormalized = useMemo(
-    () => presentKeys.map((k) => normalizeHeader(k)).filter(Boolean),
+    () => presentKeys.map((k) => normalizeHeader(labelOf(k))).filter(Boolean),
     [presentKeys],
   );
 
