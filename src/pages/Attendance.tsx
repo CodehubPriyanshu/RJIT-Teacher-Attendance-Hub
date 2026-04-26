@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
 import { formatMinutes, shortSummary } from "@/lib/timeFormat";
+import { fetchActiveHolidays } from "@/lib/workingDays";
 
 interface Row {
   id: string;
@@ -52,6 +53,7 @@ export default function Attendance() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
@@ -85,6 +87,17 @@ export default function Attendance() {
     }
   };
 
+  const fetchHolidays = async () => {
+    const dateFrom = from || "2000-01-01";
+    const dateTo = to || "2100-12-31";
+    try {
+      const holidays = await fetchActiveHolidays(dateFrom, dateTo);
+      setHolidayDates(holidays);
+    } catch (e) {
+      console.error("Failed to fetch holidays:", e);
+    }
+  };
+
   const fetchDepartments = async () => {
     const { data } = await supabase
       .from("attendance_records")
@@ -98,10 +111,12 @@ export default function Attendance() {
 
   useEffect(() => {
     fetchDepartments();
+    fetchHolidays();
   }, []);
 
   useEffect(() => {
     fetchPage();
+    fetchHolidays();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, search, teacherName, department, from, to, status, lateOnly, earlyOnly, sortKey, sortDir]);
 
@@ -279,7 +294,7 @@ export default function Attendance() {
                 <TableHead className="table-head">First Punch</TableHead>
                 <TableHead className="table-head">Last Punch</TableHead>
                 <TableHead className="table-head">Total Time</TableHead>
-                <TableHead className="table-head">Late (Min)</TableHead>
+                <TableHead className="table-head">Late Entry (Min)</TableHead>
                 <TableHead className="table-head">Early Dep. (Min)</TableHead>
                 <TableHead className="table-head">Status</TableHead>
                 <TableHead className="table-head">Summary</TableHead>
@@ -310,7 +325,7 @@ export default function Attendance() {
                   <TableCell>{r.total_time ?? "—"}</TableCell>
                   <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{formatMinutes(r.late_minutes)}</TableCell>
                   <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{formatMinutes(r.early_departure_minutes)}</TableCell>
-                  <TableCell><StatusBadge status={r.status} /></TableCell>
+                  <TableCell><StatusBadge status={r.status} isHoliday={holidayDates.has(r.attendance_date)} /></TableCell>
                   <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}>
                     {shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}
                   </TableCell>
@@ -341,14 +356,19 @@ export default function Attendance() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, isHoliday }: { status: string; isHoliday: boolean }) {
   const map: Record<string, { label: string; cls: string }> = {
     present: { label: "Present", cls: "bg-success/15 text-success border-success/30" },
-    late: { label: "Late", cls: "bg-danger/15 text-danger border-danger/30" },
+    late: { label: "Late Entry", cls: "bg-danger/15 text-danger border-danger/30" },
     absent: { label: "Absent", cls: "bg-muted text-muted-foreground border-border" },
     early_departure: { label: "Early Dep.", cls: "bg-warning/15 text-warning border-warning/30" },
     incomplete: { label: "Incomplete", cls: "bg-accent/30 text-accent-foreground border-accent/50" },
+    holiday: { label: "Holiday", cls: "bg-accent/30 text-accent-foreground border-accent/50" },
   };
+  if (isHoliday) {
+    const v = map.holiday;
+    return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
+  }
   const v = map[status] ?? map.present;
   return <Badge variant="outline" className={cn("font-semibold", v.cls)}>{v.label}</Badge>;
 }

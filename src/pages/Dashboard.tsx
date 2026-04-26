@@ -7,6 +7,8 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip as TooltipUI, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { computeWorkingDays } from "@/lib/workingDays";
 
@@ -53,11 +55,12 @@ interface TeacherAgg {
   pct: number;
 }
 
-const PAGE_SIZE = 1000;
+const PAGE_SIZES = [10, 25, 50, 100];
 
 async function fetchAllInRange(from: string, to: string) {
   const all: any[] = [];
   let offset = 0;
+  const PAGE_SIZE = 1000;
   while (true) {
     const { data, error } = await supabase
       .from("attendance_records")
@@ -75,10 +78,17 @@ async function fetchAllInRange(from: string, to: string) {
   return all;
 }
 
-function aggregateByTeacher(rows: any[], workingDays: number): TeacherAgg[] {
+async function fetchTeacherAggregations(from: string, to: string, workingDays: number, page: number, pageSize: number) {
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize - 1;
+  
+  // Fetch all attendance records for the date range
+  const allRows = await fetchAllInRange(from, to);
+  
+  // Aggregate by teacher
   const perTeacher = new Map<string, TeacherAgg>();
   const dayMap = new Map<string, any>();
-  for (const r of rows) {
+  for (const r of allRows) {
     const k = `${r.employee_id}|${r.attendance_date}`;
     const existing = dayMap.get(k);
     if (!existing) dayMap.set(k, r);
@@ -102,9 +112,14 @@ function aggregateByTeacher(rows: any[], workingDays: number): TeacherAgg[] {
   }
   for (const a of perTeacher.values()) {
     a.absent = Math.max(0, a.working - a.present);
-    a.pct = a.working ? +(a.present / a.working * 100).toFixed(1) : 0;
+    a.pct = a.working ? +(a.present / a.working * 100).toFixed(2) : 0;
   }
-  return Array.from(perTeacher.values()).sort((a, b) => b.pct - a.pct);
+  
+  const allTeachers = Array.from(perTeacher.values()).sort((a, b) => b.pct - a.pct);
+  const totalTeachers = allTeachers.length;
+  const paginatedTeachers = allTeachers.slice(start, end + 1);
+  
+  return { teachers: paginatedTeachers, total: totalTeachers };
 }
 
 export default function Dashboard() {
@@ -119,6 +134,9 @@ export default function Dashboard() {
   const [early, setEarly] = useState(0);
   const [trend, setTrend] = useState<Trend[]>([]);
   const [teachers, setTeachers] = useState<TeacherAgg[]>([]);
+  const [totalTeachers, setTotalTeachers] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [todayAvg, setTodayAvg] = useState(0);
   const [monthAvg, setMonthAvg] = useState(0);
   const [highest, setHighest] = useState<TeacherAgg | null>(null);
@@ -160,15 +178,21 @@ export default function Dashboard() {
 
       // Month-wide teacher aggregation using holiday-aware working days
       const monthWb = await computeWorkingDays(startOfMonth(new Date()), endOfMonth(new Date()));
-      const monthRows = await fetchAllInRange(monthStart, monthEnd);
-      const aggMonth = aggregateByTeacher(monthRows, monthWb.workingDays);
+      const { teachers: aggMonth, total: totalTeach } = await fetchTeacherAggregations(
+        monthStart,
+        monthEnd,
+        monthWb.workingDays,
+        currentPage,
+        pageSize
+      );
       setTeachers(aggMonth);
+      setTotalTeachers(totalTeach);
       if (aggMonth.length) {
         const sorted = [...aggMonth].sort((a, b) => b.pct - a.pct);
         setHighest(sorted[0]);
         setLowest(sorted[sorted.length - 1]);
         const avg = aggMonth.reduce((s, x) => s + x.pct, 0) / aggMonth.length;
-        setMonthAvg(+avg.toFixed(1));
+        setMonthAvg(+avg.toFixed(2));
       } else {
         setHighest(null); setLowest(null); setMonthAvg(0);
       }
@@ -180,14 +204,21 @@ export default function Dashboard() {
       const aggToday = aggregateByTeacher(todayRows, todayWb.workingDays);
       if (aggToday.length && todayWb.workingDays > 0) {
         const avg = aggToday.reduce((s, x) => s + x.pct, 0) / aggToday.length;
-        setTodayAvg(+avg.toFixed(1));
+        setTodayAvg(+avg.toFixed(2));
       } else setTodayAvg(0);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [today]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [today, currentPage, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(totalTeachers / pageSize));
+  const pageInfo = useMemo(() => {
+    const start = totalTeachers === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalTeachers);
+    return `${start.toLocaleString()}–${end.toLocaleString()} of ${totalTeachers.toLocaleString()}`;
+  }, [currentPage, pageSize, totalTeachers]);
 
   const filteredTeachers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -279,9 +310,16 @@ export default function Dashboard() {
                 <TableHead className="table-head">Working Days</TableHead>
                 <TableHead className="table-head">Present</TableHead>
                 <TableHead className="table-head">Absent</TableHead>
-                <TableHead className="table-head">Late</TableHead>
+                <TableHead className="table-head">Late Entry</TableHead>
                 <TableHead className="table-head">Early Dep.</TableHead>
-                <TableHead className="table-head">Avg %</TableHead>
+                <TableHead className="table-head">
+                  <TooltipUI>
+                    <TooltipTrigger>Avg %</TooltipTrigger>
+                    <TooltipContent>
+                      Average attendance percentage based on total working days excluding holidays
+                    </TooltipContent>
+                  </TooltipUI>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -307,12 +345,29 @@ export default function Dashboard() {
                       t.pct >= 90 ? "bg-success/15 text-success" :
                       t.pct >= 75 ? "bg-accent/20 text-accent-foreground" :
                       "bg-danger/15 text-danger",
-                    )}>{t.pct}%</span>
+                    )}>{t.pct.toFixed(2)}%</span>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+        </div>
+
+        <div className="flex items-center justify-between p-4 border-t border-border flex-wrap gap-3">
+          <div className="text-sm text-muted-foreground">{pageInfo}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+              <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map((s) => <SelectItem key={s} value={String(s)}>{s} / page</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" disabled={currentPage <= 1 || loading} onClick={() => setCurrentPage(1)}>First</Button>
+            <Button variant="outline" size="sm" disabled={currentPage <= 1 || loading} onClick={() => setCurrentPage((p) => p - 1)}>Previous</Button>
+            <span className="text-sm font-medium">Page {currentPage} / {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages || loading} onClick={() => setCurrentPage((p) => p + 1)}>Next</Button>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages || loading} onClick={() => setCurrentPage(totalPages)}>Last</Button>
+          </div>
         </div>
       </Card>
     </div>

@@ -1,4 +1,4 @@
-// Working day calculation: Total days in month - Sundays - active holidays
+// Working day calculation: Total calendar days - active holidays (Sundays included as working days unless marked as holiday)
 import { supabase } from "@/integrations/supabase/client";
 
 export interface WorkingDayBreakdown {
@@ -46,20 +46,13 @@ export async function computeWorkingDays(from: Date, to: Date): Promise<WorkingD
   const fromISO = ymd(from);
   const toISO = ymd(to);
   const totalDays = daysInRange(from, to);
-  const sundays = countSundaysInRange(from, to);
   const holidaySet = await fetchActiveHolidays(fromISO, toISO);
-  // A holiday on a Sunday should not be double counted
-  let holidaysCount = 0;
-  holidaySet.forEach((iso) => {
-    const [y, m, d] = iso.split("-").map(Number);
-    const dt = new Date(y, m - 1, d);
-    if (dt.getDay() !== 0) holidaysCount++;
-  });
-  const workingDays = Math.max(0, totalDays - sundays - holidaysCount);
+  // All holidays (including Sundays if marked) are subtracted from total days
+  const workingDays = Math.max(0, totalDays - holidaySet.size);
   return {
     totalDays,
-    sundays,
-    holidays: holidaysCount,
+    sundays: 0, // Sundays are now included as working days unless explicitly marked as holiday
+    holidays: holidaySet.size,
     workingDays,
     holidayDates: holidaySet,
   };

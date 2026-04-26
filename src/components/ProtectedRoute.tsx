@@ -14,7 +14,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
   if (!session) {
-    return <Navigate to="/auth" replace state={{ from: location }} />;
+    return <Navigate to="/" replace state={{ from: location }} />;
   }
   return <>{children}</>;
 }

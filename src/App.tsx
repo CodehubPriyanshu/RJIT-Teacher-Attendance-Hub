@@ -29,8 +29,8 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/" element={<Shell><Dashboard /></Shell>} />
+            <Route path="/" element={<Auth />} />
+            <Route path="/dashboard" element={<Shell><Dashboard /></Shell>} />
             <Route path="/attendance" element={<Shell><Attendance /></Shell>} />
             <Route path="/holidays" element={<Shell><Holidays /></Shell>} />
             <Route path="/profile" element={<Shell><Profile /></Shell>} />

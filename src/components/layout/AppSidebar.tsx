@@ -3,14 +3,13 @@ import {
   LayoutDashboard,
   ClipboardList,
   LogOut,
-  GraduationCap,
   PartyPopper,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
 const items = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/attendance", label: "Attendance Records", icon: ClipboardList },
   { to: "/holidays", label: "Holiday and Working Days", icon: PartyPopper },
 ];
@@ -21,16 +20,6 @@ export function AppSidebar() {
 
   return (
     <aside className="hidden md:flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-sidebar-border">
-        <div className="h-10 w-10 rounded-lg bg-sidebar-primary text-sidebar-primary-foreground grid place-items-center font-bold">
-          <GraduationCap className="h-5 w-5" />
-        </div>
-        <div>
-          <div className="text-sm font-bold leading-tight">RJIT</div>
-          <div className="text-[11px] uppercase tracking-wider text-sidebar-foreground/70">Admin Portal</div>
-        </div>
-      </div>
-
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {items.map((it) => {
           const active = location.pathname === it.to;
