@@ -357,7 +357,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       toast.error(`Still missing: ${missing.join(", ")}`);
       return;
     }
-    const { parsed, issues } = buildRowsFromMapping(rawJson, mapping);
+    const { parsed, issues } = buildRowsFromMapping(rawJson, mapping, headerRowIdx);
     setRows(parsed);
     setErrors(issues);
     setNeedsManualMap(false);
