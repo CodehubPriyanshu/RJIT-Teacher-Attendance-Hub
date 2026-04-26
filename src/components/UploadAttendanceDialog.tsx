@@ -570,23 +570,29 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50">
-                      <TableHead className="table-head">Emp ID</TableHead>
-                      <TableHead className="table-head">Name</TableHead>
+                      <TableHead className="table-head">No</TableHead>
+                      <TableHead className="table-head">Employee ID</TableHead>
+                      <TableHead className="table-head">First Name</TableHead>
+                      <TableHead className="table-head">Department</TableHead>
                       <TableHead className="table-head">Date</TableHead>
-                      <TableHead className="table-head">In</TableHead>
-                      <TableHead className="table-head">Out</TableHead>
-                      <TableHead className="table-head">Status</TableHead>
+                      <TableHead className="table-head">Weekday</TableHead>
+                      <TableHead className="table-head">First Punch</TableHead>
+                      <TableHead className="table-head">Last Punch</TableHead>
+                      <TableHead className="table-head">Total Time</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.slice(0, 5).map((r, i) => (
                       <TableRow key={i}>
+                        <TableCell>{r.record_number ?? "—"}</TableCell>
                         <TableCell className="font-medium">{r.employee_id}</TableCell>
                         <TableCell>{r.first_name}</TableCell>
+                        <TableCell>{r.department ?? "—"}</TableCell>
                         <TableCell>{r.attendance_date}</TableCell>
+                        <TableCell>{r.weekday ?? "—"}</TableCell>
                         <TableCell>{r.first_punch?.slice(0, 5) ?? "—"}</TableCell>
                         <TableCell>{r.last_punch?.slice(0, 5) ?? "—"}</TableCell>
-                        <TableCell>{r.status}</TableCell>
+                        <TableCell>{r.total_time ?? "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
