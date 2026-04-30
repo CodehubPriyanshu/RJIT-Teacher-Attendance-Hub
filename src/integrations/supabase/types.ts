@@ -64,6 +64,7 @@ export type Database = {
           created_at: string
           department: string | null
           early_departure_minutes: number
+          extra_work_minutes: number
           employee_id: string
           first_name: string
           first_punch: string | null
@@ -80,6 +81,7 @@ export type Database = {
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
+          extra_work_minutes?: number
           employee_id: string
           first_name: string
           first_punch?: string | null
@@ -96,6 +98,7 @@ export type Database = {
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
+          extra_work_minutes?: number
           employee_id?: string
           first_name?: string
           first_punch?: string | null

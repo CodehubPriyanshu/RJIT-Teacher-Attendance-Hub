@@ -102,6 +102,7 @@ type ParsedRow = {
   total_time: string | null;
   late_minutes: number;
   early_departure_minutes: number;
+  extra_work_minutes: number;
   status: string;
 };
 
@@ -191,6 +192,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
           total_time: String(get(r, "Total Time") ?? "").trim() || null,
           late_minutes: calc.late_minutes,
           early_departure_minutes: calc.early_departure_minutes,
+          extra_work_minutes: calc.extra_work_minutes,
           status: calc.status,
         });
       });

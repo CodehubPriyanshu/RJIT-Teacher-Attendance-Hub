@@ -27,6 +27,7 @@ interface Row {
   total_time: string | null;
   late_minutes: number;
   early_departure_minutes: number;
+  extra_work_minutes?: number;
   status: string;
 }
 
@@ -166,10 +167,11 @@ export default function Attendance() {
           "First Punch": r.first_punch?.slice(0, 5) ?? "",
           "Last Punch": r.last_punch?.slice(0, 5) ?? "",
           "Total Time": r.total_time ?? "",
-          "Late (Min)": formatMinutes(r.late_minutes),
+          "Late Entry (Min)": formatMinutes(r.late_minutes),
           "Early Dep. (Min)": formatMinutes(r.early_departure_minutes),
+          "Extra Work Time": formatMinutes(r.extra_work_minutes ?? 0),
           Status: r.status,
-          Summary: shortSummary(r.late_minutes, r.early_departure_minutes, r.status),
+          Summary: shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0),
         })),
       );
       const wb = XLSX.utils.book_new();
@@ -296,6 +298,7 @@ export default function Attendance() {
                 <TableHead className="table-head">Total Time</TableHead>
                 <TableHead className="table-head">Late Entry (Min)</TableHead>
                 <TableHead className="table-head">Early Dep. (Min)</TableHead>
+                <TableHead className="table-head">Extra Work Time</TableHead>
                 <TableHead className="table-head">Status</TableHead>
                 <TableHead className="table-head">Summary</TableHead>
               </TableRow>
@@ -325,9 +328,10 @@ export default function Attendance() {
                   <TableCell>{r.total_time ?? "—"}</TableCell>
                   <TableCell className={cn(r.late_minutes > 0 && "text-danger font-semibold")}>{formatMinutes(r.late_minutes)}</TableCell>
                   <TableCell className={cn(r.early_departure_minutes > 0 && "text-warning font-semibold")}>{formatMinutes(r.early_departure_minutes)}</TableCell>
+                  <TableCell className={cn((r.extra_work_minutes ?? 0) > 0 && "text-success font-semibold")}>{formatMinutes(r.extra_work_minutes ?? 0)}</TableCell>
                   <TableCell><StatusBadge status={r.status} isHoliday={holidayDates.has(r.attendance_date)} /></TableCell>
-                  <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}>
-                    {shortSummary(r.late_minutes, r.early_departure_minutes, r.status)}
+                  <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0)}>
+                    {shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0)}
                   </TableCell>
                 </TableRow>
               ))}

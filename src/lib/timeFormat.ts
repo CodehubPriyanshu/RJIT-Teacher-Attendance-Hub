@@ -8,11 +8,12 @@ export function formatMinutes(mins: number): string {
   return `${h} hr ${String(m).padStart(2, "0")} min`;
 }
 
-/** Build short summary like "On Time", "Late 10 min", "Early 1 hr 30 min". */
+/** Build short summary like "On Time", "Late 10 min", "Early 1 hr 30 min", "Extra Work 30 min". */
 export function shortSummary(
   lateMin: number,
   earlyMin: number,
   status: string,
+  extraWorkMin: number = 0,
 ): string {
   if (status === "absent") return "Absent";
   if (status === "incomplete")
@@ -20,6 +21,7 @@ export function shortSummary(
   const parts: string[] = [];
   if (lateMin > 0) parts.push(`Late ${formatMinutes(lateMin)}`);
   if (earlyMin > 0) parts.push(`Early ${formatMinutes(earlyMin)}`);
+  if (extraWorkMin > 0) parts.push(`Extra Work ${formatMinutes(extraWorkMin)}`);
   if (parts.length === 0) return "On Time";
   return parts.join(" and ");
 }

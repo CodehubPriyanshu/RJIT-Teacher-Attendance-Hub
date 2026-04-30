@@ -14,17 +14,27 @@ export type ComputedStatus = "present" | "late" | "absent" | "early_departure" |
 export interface ComputedAttendance {
   late_minutes: number;
   early_departure_minutes: number;
+  extra_work_minutes: number;
   status: ComputedStatus;
   summary: string;
 }
 
-export function buildSummary(lateMin: number, earlyMin: number, status: ComputedStatus): string {
+export function buildSummary(lateMin: number, earlyMin: number, extraWorkMin: number, status: ComputedStatus): string {
   if (status === "absent") return "Absent";
   if (status === "incomplete") return lateMin > 0 ? `Late by ${lateMin} min, no Last Punch` : "No Last Punch";
-  if (lateMin > 0 && earlyMin > 0) return `Late by ${lateMin} min and Early departure by ${earlyMin} min`;
-  if (lateMin > 0) return `Late by ${lateMin} min`;
-  if (earlyMin > 0) return `Early departure by ${earlyMin} min`;
-  return "On Time";
+  
+  const parts: string[] = [];
+  if (lateMin > 0) parts.push(`Late by ${lateMin} min`);
+  if (earlyMin > 0) parts.push(`Early departure by ${earlyMin} min`);
+  if (extraWorkMin > 0) {
+    const h = Math.floor(extraWorkMin / 60);
+    const m = extraWorkMin % 60;
+    const extraStr = h > 0 ? (m > 0 ? `${h} hr ${m} min` : `${h} hr`) : `${m} min`;
+    parts.push(`Extra Work ${extraStr}`);
+  }
+  
+  if (parts.length === 0) return "On Time";
+  return parts.join(" and ");
 }
 
 /** Parse "HH:MM" or "HH:MM:SS" or Excel decimal day (0..1) into minutes since midnight, or null. */
@@ -63,23 +73,28 @@ export function computeStatus(firstPunchMin: number | null, lastPunchMin: number
   // Validation rules:
   // - Missing First Punch -> Absent
   // - Missing Last Punch (but has First) -> Incomplete
-  // - Both present -> Present (with possible Late / Early Departure)
+  // - Both present -> Present (with possible Late / Early Departure / Extra Work)
   if (firstPunchMin === null) {
-    return { late_minutes: 0, early_departure_minutes: 0, status: "absent", summary: "Absent" };
+    return { late_minutes: 0, early_departure_minutes: 0, extra_work_minutes: 0, status: "absent", summary: "Absent" };
   }
 
   const startMin = REPORTING_HOUR * 60 + REPORTING_MIN; // 09:00
+  const lateThreshold = startMin + GRACE_MIN; // 09:10 (550 minutes)
   const departLimit = DEPARTURE_HOUR * 60 + DEPARTURE_MIN; // 17:00
 
-  // Late = First Punch - 09:00 (only if > 09:00). Grace ignored per spec.
-  const late = firstPunchMin > startMin ? firstPunchMin - startMin : 0;
+  // Late = First Punch - 09:10 (only if > 09:10, grace period applied)
+  const late = firstPunchMin > lateThreshold ? firstPunchMin - lateThreshold : 0;
 
   let early = 0;
+  let extraWork = 0;
   let status: ComputedStatus;
+  
   if (lastPunchMin === null) {
     status = "incomplete";
   } else {
     early = lastPunchMin < departLimit ? departLimit - lastPunchMin : 0;
+    extraWork = lastPunchMin > departLimit ? lastPunchMin - departLimit : 0;
+    
     if (late > 0) status = "late";
     else if (early > 0) status = "early_departure";
     else status = "present";
@@ -88,8 +103,9 @@ export function computeStatus(firstPunchMin: number | null, lastPunchMin: number
   return {
     late_minutes: late,
     early_departure_minutes: early,
+    extra_work_minutes: extraWork,
     status,
-    summary: buildSummary(late, early, status),
+    summary: buildSummary(late, early, extraWork, status),
   };
 }
 
