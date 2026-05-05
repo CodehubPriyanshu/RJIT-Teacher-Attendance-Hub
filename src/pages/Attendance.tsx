@@ -33,6 +33,26 @@ interface Row {
 
 const PAGE_SIZES = [10, 25, 50, 100];
 type SortKey = "attendance_date" | "first_name" | "employee_id" | "record_number";
+type MinuteFilter = "all" | "10" | "20" | "30" | "more_than_30";
+
+const MINUTE_FILTER_OPTIONS: { value: MinuteFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "10", label: "10 min" },
+  { value: "20", label: "20 min" },
+  { value: "30", label: "30 min" },
+  { value: "more_than_30", label: "More than 30 min" },
+];
+
+const minuteFilterLabel = (option: { value: MinuteFilter; label: string }, allLabel: string) =>
+  option.value === "all" ? allLabel : option.label;
+
+function applyMinuteFilter(query: any, column: string, filter: MinuteFilter) {
+  if (filter === "10") return query.gte(column, 10).lt(column, 20);
+  if (filter === "20") return query.gte(column, 20).lt(column, 30);
+  if (filter === "30") return query.gte(column, 30).lt(column, 60);
+  if (filter === "more_than_30") return query.gte(column, 30);
+  return query;
+}
 
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -47,9 +67,11 @@ export default function Attendance() {
   const [departments, setDepartments] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [selectedDate, setSelectedDate] = useState("");
   const [status, setStatus] = useState<string>("all");
-  const [lateOnly, setLateOnly] = useState<string>("all");
-  const [earlyOnly, setEarlyOnly] = useState<string>("all");
+  const [lateOnly, setLateOnly] = useState<MinuteFilter>("all");
+  const [earlyOnly, setEarlyOnly] = useState<MinuteFilter>("all");
+  const [extraWorkFilter, setExtraWorkFilter] = useState<MinuteFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("attendance_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
@@ -65,9 +87,11 @@ export default function Attendance() {
     if (department !== "all") q = q.eq("department", department);
     if (from) q = q.gte("attendance_date", from);
     if (to) q = q.lte("attendance_date", to);
+    if (selectedDate) q = q.eq("attendance_date", selectedDate);
     if (status !== "all") q = q.eq("status", status);
-    if (lateOnly === "yes") q = q.gt("late_minutes", 0);
-    if (earlyOnly === "yes") q = q.gt("early_departure_minutes", 0);
+    q = applyMinuteFilter(q, "late_minutes", lateOnly);
+    q = applyMinuteFilter(q, "early_departure_minutes", earlyOnly);
+    q = applyMinuteFilter(q, "extra_work_minutes", extraWorkFilter);
     q = q.order(sortKey, { ascending: sortDir === "asc" });
     return q;
   };
@@ -119,7 +143,7 @@ export default function Attendance() {
     fetchPage();
     fetchHolidays();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, teacherName, department, from, to, status, lateOnly, earlyOnly, sortKey, sortDir]);
+  }, [page, pageSize, search, teacherName, department, from, to, selectedDate, status, lateOnly, earlyOnly, extraWorkFilter, sortKey, sortDir]);
 
   const setSort = (k: SortKey, dir: "asc" | "desc") => {
     setSortKey(k);
@@ -261,20 +285,42 @@ export default function Attendance() {
             <label className="text-xs text-muted-foreground">To</label>
             <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
           </div>
-          <Select value={lateOnly} onValueChange={(v) => { setLateOnly(v); setPage(1); }}>
+          <Select value={lateOnly} onValueChange={(v) => { setLateOnly(v as MinuteFilter); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder="Late filter" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All (Late filter)</SelectItem>
-              <SelectItem value="yes">Late only (&gt; 0 min)</SelectItem>
+              {MINUTE_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {minuteFilterLabel(option, "Late Entry (Min)")}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          <Select value={earlyOnly} onValueChange={(v) => { setEarlyOnly(v); setPage(1); }}>
+          <Select value={earlyOnly} onValueChange={(v) => { setEarlyOnly(v as MinuteFilter); setPage(1); }}>
             <SelectTrigger><SelectValue placeholder="Early filter" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All (Early filter)</SelectItem>
-              <SelectItem value="yes">Early Dep. only (&gt; 0 min)</SelectItem>
+              {MINUTE_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {minuteFilterLabel(option, "Early Dep. (Min)")}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Select value={extraWorkFilter} onValueChange={(v) => { setExtraWorkFilter(v as MinuteFilter); setPage(1); }}>
+            <SelectTrigger><SelectValue placeholder="All (Extra Work filter)" /></SelectTrigger>
+            <SelectContent>
+              {MINUTE_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.value === "all" ? "All (Extra Work filter)" : option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div>
+            <label className="text-xs text-muted-foreground">Select Date</label>
+            <Input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setPage(1); }} />
+          </div>
         </div>
       </Card>
 

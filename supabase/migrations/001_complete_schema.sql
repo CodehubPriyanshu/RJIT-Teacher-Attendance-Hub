@@ -5,12 +5,18 @@
 -- =====================================================
 -- 1. ENUMS & TYPES
 -- =====================================================
-CREATE TYPE public.app_role AS ENUM ('admin', 'user');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typname = 'app_role') THEN
+    CREATE TYPE public.app_role AS ENUM ('admin', 'user');
+  END IF;
+END;
+$$;
 
 -- =====================================================
 -- 2. USER ROLES TABLE
 -- =====================================================
-CREATE TABLE public.user_roles (
+CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   role app_role NOT NULL,
@@ -27,13 +33,15 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
 $$;
 
 -- RLS Policies for user_roles
+DROP POLICY IF EXISTS "Users see own roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Admins manage roles" ON public.user_roles;
 CREATE POLICY "Users see own roles" ON public.user_roles FOR SELECT TO authenticated USING (user_id = auth.uid());
 CREATE POLICY "Admins manage roles" ON public.user_roles FOR ALL TO authenticated USING (public.has_role(auth.uid(),'admin')) WITH CHECK (public.has_role(auth.uid(),'admin'));
 
 -- =====================================================
 -- 3. PROFILES TABLE
 -- =====================================================
-CREATE TABLE public.profiles (
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL UNIQUE,
   full_name TEXT,
@@ -46,6 +54,11 @@ CREATE TABLE public.profiles (
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for profiles
+DROP POLICY IF EXISTS "Users view own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Admins delete profiles" ON public.profiles;
+
 CREATE POLICY "Users view own profile" ON public.profiles
   FOR SELECT TO authenticated
   USING (user_id = auth.uid() OR has_role(auth.uid(), 'admin'));
@@ -71,6 +84,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SET search_path = public;
 
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
+
 CREATE TRIGGER update_profiles_updated_at
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
@@ -90,6 +105,8 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS on_auth_user_created_profile ON auth.users;
+
 CREATE TRIGGER on_auth_user_created_profile
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_profile();
@@ -97,7 +114,7 @@ CREATE TRIGGER on_auth_user_created_profile
 -- =====================================================
 -- 4. ATTENDANCE RECORDS TABLE
 -- =====================================================
-CREATE TABLE public.attendance_records (
+CREATE TABLE IF NOT EXISTS public.attendance_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   record_number INTEGER,
   employee_id TEXT NOT NULL,
@@ -141,6 +158,11 @@ COMMENT ON COLUMN public.attendance_records.extra_work_minutes IS 'Overtime minu
 -- RLS for attendance_records
 ALTER TABLE public.attendance_records ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins all attendance_records" ON public.attendance_records;
+DROP POLICY IF EXISTS "Authenticated read attendance_records" ON public.attendance_records;
+DROP POLICY IF EXISTS "Authenticated insert attendance_records" ON public.attendance_records;
+DROP POLICY IF EXISTS "Authenticated update attendance_records" ON public.attendance_records;
+
 CREATE POLICY "Admins all attendance_records"
   ON public.attendance_records
   FOR ALL
@@ -148,10 +170,29 @@ CREATE POLICY "Admins all attendance_records"
   USING (public.has_role(auth.uid(), 'admin'))
   WITH CHECK (public.has_role(auth.uid(), 'admin'));
 
+CREATE POLICY "Authenticated read attendance_records"
+  ON public.attendance_records
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE POLICY "Authenticated insert attendance_records"
+  ON public.attendance_records
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+CREATE POLICY "Authenticated update attendance_records"
+  ON public.attendance_records
+  FOR UPDATE
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
 -- =====================================================
 -- 5. HOLIDAYS TABLE
 -- =====================================================
-CREATE TABLE public.holidays (
+CREATE TABLE IF NOT EXISTS public.holidays (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   holiday_date DATE NOT NULL UNIQUE,
   holiday_name TEXT NOT NULL,
@@ -168,12 +209,21 @@ CREATE INDEX IF NOT EXISTS idx_holidays_status ON public.holidays (status);
 -- RLS for holidays
 ALTER TABLE public.holidays ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins all holidays" ON public.holidays;
+DROP POLICY IF EXISTS "Authenticated read holidays" ON public.holidays;
+
 CREATE POLICY "Admins all holidays"
   ON public.holidays
   FOR ALL
   TO authenticated
   USING (public.has_role(auth.uid(), 'admin'))
   WITH CHECK (public.has_role(auth.uid(), 'admin'));
+
+CREATE POLICY "Authenticated read holidays"
+  ON public.holidays
+  FOR SELECT
+  TO authenticated
+  USING (true);
 
 -- =====================================================
 -- 6. TRIGGERS & FUNCTIONS
@@ -189,6 +239,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
 CREATE TRIGGER on_auth_user_created 
   AFTER INSERT ON auth.users 
