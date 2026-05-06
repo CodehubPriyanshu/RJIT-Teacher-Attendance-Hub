@@ -35,6 +35,17 @@ const PAGE_SIZES = [10, 25, 50, 100];
 type SortKey = "attendance_date" | "first_name" | "employee_id" | "record_number";
 type MinuteFilter = "all" | "10" | "20" | "30" | "more_than_30";
 
+const DEFAULT_DEPARTMENT_OPTIONS = [
+  "Faculty (Regular)",
+  "Other Academic (Regular)",
+  "Non-Teaching Staff (Regular)",
+  "Admin Staff (Regular)",
+  "Faculty (Contractual)",
+  "Non-Teaching (Contractual)",
+  "Admin Staff (Contractual)",
+  "Staff Muster Roll",
+];
+
 const MINUTE_FILTER_OPTIONS: { value: MinuteFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "10", label: "10 min" },
@@ -54,37 +65,66 @@ function applyMinuteFilter(query: any, column: string, filter: MinuteFilter) {
   return query;
 }
 
+interface Filters {
+  search: string;
+  teacherName: string;
+  department: string;
+  from: string;
+  to: string;
+  selectedDate: string;
+  status: string;
+  lateOnly: MinuteFilter;
+  earlyOnly: MinuteFilter;
+  extraWorkFilter: MinuteFilter;
+}
+
+const DEFAULT_FILTERS: Filters = {
+  search: "",
+  teacherName: "",
+  department: "all",
+  from: "",
+  to: "",
+  selectedDate: "",
+  status: "all",
+  lateOnly: "all",
+  earlyOnly: "all",
+  extraWorkFilter: "all",
+};
+
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [teacherName, setTeacherName] = useState("");
-  const [teacherInput, setTeacherInput] = useState("");
-  const [department, setDepartment] = useState<string>("all");
-  const [departments, setDepartments] = useState<string[]>([]);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [selectedDate, setSelectedDate] = useState("");
-  const [status, setStatus] = useState<string>("all");
-  const [lateOnly, setLateOnly] = useState<MinuteFilter>("all");
-  const [earlyOnly, setEarlyOnly] = useState<MinuteFilter>("all");
-  const [extraWorkFilter, setExtraWorkFilter] = useState<MinuteFilter>("all");
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [filterVersion, setFilterVersion] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("attendance_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS);
 
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
   const buildQuery = () => {
+    const {
+      search,
+      teacherName,
+      department,
+      from,
+      to,
+      selectedDate,
+      status,
+      lateOnly,
+      earlyOnly,
+      extraWorkFilter,
+    } = appliedFilters;
     let q = supabase.from("attendance_records").select("*", { count: "exact" });
     if (search) q = q.or(`employee_id.ilike.%${search}%,first_name.ilike.%${search}%`);
     if (teacherName) q = q.ilike("first_name", `%${teacherName}%`);
-    if (department !== "all") q = q.eq("department", department);
+    if (department !== "all") q = q.ilike("department", `%${department.trim()}%`);
     if (from) q = q.gte("attendance_date", from);
     if (to) q = q.lte("attendance_date", to);
     if (selectedDate) q = q.eq("attendance_date", selectedDate);
@@ -113,8 +153,8 @@ export default function Attendance() {
   };
 
   const fetchHolidays = async () => {
-    const dateFrom = from || "2000-01-01";
-    const dateTo = to || "2100-12-31";
+    const dateFrom = appliedFilters.selectedDate || appliedFilters.from || "2000-01-01";
+    const dateTo = appliedFilters.selectedDate || appliedFilters.to || "2100-12-31";
     try {
       const holidays = await fetchActiveHolidays(dateFrom, dateTo);
       setHolidayDates(holidays);
@@ -123,27 +163,43 @@ export default function Attendance() {
     }
   };
 
-  const fetchDepartments = async () => {
-    const { data } = await supabase
-      .from("attendance_records")
-      .select("department")
-      .not("department", "is", null)
-      .limit(1000);
-    const set = new Set<string>();
-    (data ?? []).forEach((r: any) => r.department && set.add(r.department));
-    setDepartments(Array.from(set).sort());
+  const fetchDepartmentOptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("attendance_records")
+        .select("department")
+        .not("department", "is", null)
+        .limit(10000);
+      if (error) throw error;
+
+      const normalizedFromDb = (data ?? [])
+        .map((item) => item.department?.replace(/\s+/g, " ").trim())
+        .filter((department): department is string => Boolean(department));
+
+      const unique = new Map<string, string>();
+      for (const department of [...DEFAULT_DEPARTMENT_OPTIONS, ...normalizedFromDb]) {
+        const key = department.toLowerCase();
+        if (!unique.has(key)) unique.set(key, department);
+      }
+
+      const options = Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
+      setDepartmentOptions(options.length ? options : DEFAULT_DEPARTMENT_OPTIONS);
+    } catch (e) {
+      console.error("Failed to fetch department options:", e);
+      setDepartmentOptions(DEFAULT_DEPARTMENT_OPTIONS);
+    }
   };
 
   useEffect(() => {
-    fetchDepartments();
-    fetchHolidays();
+    fetchDepartmentOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     fetchPage();
     fetchHolidays();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, teacherName, department, from, to, selectedDate, status, lateOnly, earlyOnly, extraWorkFilter, sortKey, sortDir]);
+  }, [page, pageSize, appliedFilters, sortKey, sortDir, filterVersion]);
 
   const setSort = (k: SortKey, dir: "asc" | "desc") => {
     setSortKey(k);
@@ -156,13 +212,21 @@ export default function Attendance() {
     setPage(1);
   };
 
-  const applySearch = () => {
-    setSearch(searchInput.trim());
+  const applyFilters = () => {
+    setAppliedFilters({
+      ...filters,
+      search: filters.search.trim(),
+      teacherName: filters.teacherName.trim(),
+    });
     setPage(1);
+    setFilterVersion((v) => v + 1);
   };
-  const applyTeacher = () => {
-    setTeacherName(teacherInput.trim());
+
+  const clearFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setAppliedFilters(DEFAULT_FILTERS);
     setPage(1);
+    setFilterVersion((v) => v + 1);
   };
 
   const handleExport = async () => {
@@ -223,7 +287,7 @@ export default function Attendance() {
           <p className="text-sm text-muted-foreground">{count.toLocaleString()} matching records</p>
         </div>
         <div className="flex gap-2">
-          <UploadAttendanceDialog onUploaded={() => { setPage(1); fetchPage(); fetchDepartments(); }} />
+          <UploadAttendanceDialog onUploaded={() => { setPage(1); setFilterVersion((v) => v + 1); }} />
           <Button size="sm" onClick={handleExport} disabled={exporting || count === 0}>
             <Download className="h-4 w-4 mr-2" />
             {exporting ? "Exporting…" : "Export Excel"}
@@ -239,32 +303,32 @@ export default function Attendance() {
               <Input
                 placeholder="Employee ID or Name"
                 className="pl-9"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && applySearch()}
+                value={filters.search}
+                onChange={(e) => setFilters((current) => ({ ...current, search: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && applyFilters()}
               />
             </div>
-            <Button variant="secondary" onClick={applySearch}>Go</Button>
+            <Button variant="secondary" onClick={applyFilters}>Go</Button>
           </div>
           <div className="flex gap-2">
             <Input
               placeholder="Filter by Teacher Name"
-              value={teacherInput}
-              onChange={(e) => setTeacherInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && applyTeacher()}
+              value={filters.teacherName}
+              onChange={(e) => setFilters((current) => ({ ...current, teacherName: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && applyFilters()}
             />
-            <Button variant="secondary" onClick={applyTeacher}>Go</Button>
+            <Button variant="secondary" onClick={applyFilters}>Go</Button>
           </div>
-          <Select value={department} onValueChange={(v) => { setDepartment(v); setPage(1); }}>
+          <Select value={filters.department} onValueChange={(v) => setFilters((current) => ({ ...current, department: v }))}>
             <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Departments</SelectItem>
-              {departments.map((d) => (
+              {departmentOptions.map((d) => (
                 <SelectItem key={d} value={d}>{d}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
+          <Select value={filters.status} onValueChange={(v) => setFilters((current) => ({ ...current, status: v }))}>
             <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
@@ -279,35 +343,35 @@ export default function Attendance() {
         <div className="grid gap-3 md:grid-cols-4">
           <div>
             <label className="text-xs text-muted-foreground">From</label>
-            <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
+            <Input type="date" value={filters.from} onChange={(e) => setFilters((current) => ({ ...current, from: e.target.value }))} />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">To</label>
-            <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
+            <Input type="date" value={filters.to} onChange={(e) => setFilters((current) => ({ ...current, to: e.target.value }))} />
           </div>
-          <Select value={lateOnly} onValueChange={(v) => { setLateOnly(v as MinuteFilter); setPage(1); }}>
+          <Select value={filters.lateOnly} onValueChange={(v) => setFilters((current) => ({ ...current, lateOnly: v as MinuteFilter }))}>
             <SelectTrigger><SelectValue placeholder="Late filter" /></SelectTrigger>
             <SelectContent>
               {MINUTE_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {minuteFilterLabel(option, "Late Entry (Min)")}
+                  {minuteFilterLabel(option, "All (Late filter)")}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Select value={earlyOnly} onValueChange={(v) => { setEarlyOnly(v as MinuteFilter); setPage(1); }}>
+          <Select value={filters.earlyOnly} onValueChange={(v) => setFilters((current) => ({ ...current, earlyOnly: v as MinuteFilter }))}>
             <SelectTrigger><SelectValue placeholder="Early filter" /></SelectTrigger>
             <SelectContent>
               {MINUTE_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {minuteFilterLabel(option, "Early Dep. (Min)")}
+                  {minuteFilterLabel(option, "All (Early filter)")}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
-          <Select value={extraWorkFilter} onValueChange={(v) => { setExtraWorkFilter(v as MinuteFilter); setPage(1); }}>
+          <Select value={filters.extraWorkFilter} onValueChange={(v) => setFilters((current) => ({ ...current, extraWorkFilter: v as MinuteFilter }))}>
             <SelectTrigger><SelectValue placeholder="All (Extra Work filter)" /></SelectTrigger>
             <SelectContent>
               {MINUTE_FILTER_OPTIONS.map((option) => (
@@ -319,7 +383,11 @@ export default function Attendance() {
           </Select>
           <div>
             <label className="text-xs text-muted-foreground">Select Date</label>
-            <Input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setPage(1); }} />
+            <Input type="date" value={filters.selectedDate} onChange={(e) => setFilters((current) => ({ ...current, selectedDate: e.target.value }))} />
+          </div>
+          <div className="flex items-end gap-2">
+            <Button variant="secondary" onClick={applyFilters}>Go</Button>
+            <Button variant="outline" onClick={clearFilters}>Clear</Button>
           </div>
         </div>
       </Card>
