@@ -18,6 +18,7 @@ import { UploadCloud, FileSpreadsheet, AlertCircle, CheckCircle2, Upload } from 
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { computeStatus, minutesToTimeStr, toDateStr, toMinutes } from "@/lib/attendanceCalc";
+import { getAttendanceShift } from "@/lib/attendanceShift";
 import { cn } from "@/lib/utils";
 
 type RequiredField =
@@ -113,6 +114,10 @@ interface Props {
   onUploaded?: () => void;
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function UploadAttendanceDialog({ onUploaded }: Props) {
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -179,7 +184,7 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         }
         const fp = toMinutes(get(r, "First Punch"));
         const lp = toMinutes(get(r, "Last Punch"));
-        const calc = computeStatus(fp, lp);
+        const calc = computeStatus(fp, lp, getAttendanceShift(firstName));
         parsed.push({
           record_number: Number(get(r, "No")) || null,
           employee_id: empId,
@@ -344,8 +349,8 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
         } else {
           toast.success(`Parsed ${parsed.length.toLocaleString()} rows`);
         }
-      } catch (e: any) {
-        setErrors([e?.message ?? "Failed to read file"]);
+      } catch (e: unknown) {
+        setErrors([errorMessage(e, "Failed to read file")]);
       } finally {
         setParsing(false);
       }
@@ -398,8 +403,8 @@ export function UploadAttendanceDialog({ onUploaded }: Props) {
       onUploaded?.();
       setOpen(false);
       reset();
-    } catch (e: any) {
-      toast.error(e?.message ?? "Upload failed");
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Upload failed"));
     } finally {
       setUploading(false);
     }

@@ -7,12 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
 import { formatMinutes, shortSummary } from "@/lib/timeFormat";
 import { fetchActiveHolidays } from "@/lib/workingDays";
+import { computeStatus, toMinutes } from "@/lib/attendanceCalc";
+import { getAttendanceShift, type AttendanceShiftCategory } from "@/lib/attendanceShift";
 
 interface Row {
   id: string;
@@ -57,12 +60,16 @@ const MINUTE_FILTER_OPTIONS: { value: MinuteFilter; label: string }[] = [
 const minuteFilterLabel = (option: { value: MinuteFilter; label: string }, allLabel: string) =>
   option.value === "all" ? allLabel : option.label;
 
-function applyMinuteFilter(query: any, column: string, filter: MinuteFilter) {
-  if (filter === "10") return query.gte(column, 10).lt(column, 20);
-  if (filter === "20") return query.gte(column, 20).lt(column, 30);
-  if (filter === "30") return query.gte(column, 30).lt(column, 60);
-  if (filter === "more_than_30") return query.gte(column, 30);
-  return query;
+function matchesMinuteFilter(value: number, filter: MinuteFilter) {
+  if (filter === "10") return value >= 10 && value < 20;
+  if (filter === "20") return value >= 20 && value < 30;
+  if (filter === "30") return value >= 30 && value < 60;
+  if (filter === "more_than_30") return value >= 30;
+  return true;
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 interface Filters {
@@ -76,6 +83,7 @@ interface Filters {
   lateOnly: MinuteFilter;
   earlyOnly: MinuteFilter;
   extraWorkFilter: MinuteFilter;
+  shiftCategory: AttendanceShiftCategory;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -89,7 +97,24 @@ const DEFAULT_FILTERS: Filters = {
   lateOnly: "all",
   earlyOnly: "all",
   extraWorkFilter: "all",
+  shiftCategory: "09:00",
 };
+
+function withShiftCalculations(row: Row): Row {
+  const calc = computeStatus(
+    toMinutes(row.first_punch),
+    toMinutes(row.last_punch),
+    getAttendanceShift(row.first_name),
+  );
+
+  return {
+    ...row,
+    late_minutes: calc.late_minutes,
+    early_departure_minutes: calc.early_departure_minutes,
+    extra_work_minutes: calc.extra_work_minutes,
+    status: calc.status,
+  };
+}
 
 export default function Attendance() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -108,7 +133,7 @@ export default function Attendance() {
 
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
-  const buildQuery = () => {
+  const buildBaseQuery = () => {
     const {
       search,
       teacherName,
@@ -116,24 +141,27 @@ export default function Attendance() {
       from,
       to,
       selectedDate,
-      status,
-      lateOnly,
-      earlyOnly,
-      extraWorkFilter,
     } = appliedFilters;
-    let q = supabase.from("attendance_records").select("*", { count: "exact" });
+    let q = supabase.from("attendance_records_all").select("*");
     if (search) q = q.or(`employee_id.ilike.%${search}%,first_name.ilike.%${search}%`);
     if (teacherName) q = q.ilike("first_name", `%${teacherName}%`);
     if (department !== "all") q = q.ilike("department", `%${department.trim()}%`);
     if (from) q = q.gte("attendance_date", from);
     if (to) q = q.lte("attendance_date", to);
     if (selectedDate) q = q.eq("attendance_date", selectedDate);
-    if (status !== "all") q = q.eq("status", status);
-    q = applyMinuteFilter(q, "late_minutes", lateOnly);
-    q = applyMinuteFilter(q, "early_departure_minutes", earlyOnly);
-    q = applyMinuteFilter(q, "extra_work_minutes", extraWorkFilter);
     q = q.order(sortKey, { ascending: sortDir === "asc" });
     return q;
+  };
+
+  const applyClientFilters = (records: Row[]) => {
+    const { status, lateOnly, earlyOnly, extraWorkFilter, shiftCategory } = appliedFilters;
+    return records
+      .map(withShiftCalculations)
+      .filter((record) => getAttendanceShift(record.first_name).category === shiftCategory)
+      .filter((record) => status === "all" || record.status === status)
+      .filter((record) => matchesMinuteFilter(record.late_minutes, lateOnly))
+      .filter((record) => matchesMinuteFilter(record.early_departure_minutes, earlyOnly))
+      .filter((record) => matchesMinuteFilter(record.extra_work_minutes ?? 0, extraWorkFilter));
   };
 
   const fetchPage = async () => {
@@ -141,12 +169,29 @@ export default function Attendance() {
     try {
       const start = (page - 1) * pageSize;
       const end = start + pageSize - 1;
-      const { data, count: c, error } = await buildQuery().range(start, end);
-      if (error) throw error;
-      setRows((data as Row[]) ?? []);
-      setCount(c ?? 0);
-    } catch (e: any) {
-      toast.error(e?.message ?? "Failed to load");
+      const pageRows: Row[] = [];
+      let filteredCount = 0;
+      const PAGE = 1000;
+      let offset = 0;
+      while (true) {
+        const { data, error } = await buildBaseQuery().range(offset, offset + PAGE - 1);
+        if (error) throw error;
+        const rawChunk = (data as Row[]) ?? [];
+        const filteredChunk = applyClientFilters(rawChunk);
+        for (const row of filteredChunk) {
+          if (filteredCount >= start && filteredCount <= end) {
+            pageRows.push(row);
+          }
+          filteredCount += 1;
+        }
+        if (rawChunk.length < PAGE) break;
+        offset += PAGE;
+        if (offset >= 100000) break;
+      }
+      setRows(pageRows);
+      setCount(filteredCount);
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Failed to load"));
     } finally {
       setLoading(false);
     }
@@ -166,7 +211,7 @@ export default function Attendance() {
   const fetchDepartmentOptions = async () => {
     try {
       const { data, error } = await supabase
-        .from("attendance_records")
+        .from("attendance_records_all")
         .select("department")
         .not("department", "is", null)
         .limit(10000);
@@ -192,7 +237,6 @@ export default function Attendance() {
 
   useEffect(() => {
     fetchDepartmentOptions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -229,6 +273,13 @@ export default function Attendance() {
     setFilterVersion((v) => v + 1);
   };
 
+  const setShiftCategory = (shiftCategory: AttendanceShiftCategory) => {
+    setFilters((current) => ({ ...current, shiftCategory }));
+    setAppliedFilters((current) => ({ ...current, shiftCategory }));
+    setPage(1);
+    setFilterVersion((v) => v + 1);
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -236,7 +287,7 @@ export default function Attendance() {
       const PAGE = 1000;
       let offset = 0;
       while (true) {
-        const { data, error } = await buildQuery().range(offset, offset + PAGE - 1);
+        const { data, error } = await buildBaseQuery().range(offset, offset + PAGE - 1);
         if (error) throw error;
         const chunk = (data as Row[]) ?? [];
         all.push(...chunk);
@@ -244,8 +295,9 @@ export default function Attendance() {
         offset += PAGE;
         if (all.length >= 100000) break;
       }
+      const filtered = applyClientFilters(all);
       const ws = XLSX.utils.json_to_sheet(
-        all.map((r) => ({
+        filtered.map((r) => ({
           No: r.record_number,
           "Employee ID": r.employee_id,
           "Teacher Name": r.first_name,
@@ -265,9 +317,9 @@ export default function Attendance() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Attendance");
       XLSX.writeFile(wb, `attendance_${new Date().toISOString().slice(0, 10)}.xlsx`);
-      toast.success(`Exported ${all.length.toLocaleString()} records`);
-    } catch (e: any) {
-      toast.error(e?.message ?? "Export failed");
+      toast.success(`Exported ${filtered.length.toLocaleString()} records`);
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Export failed"));
     } finally {
       setExporting(false);
     }
@@ -296,6 +348,21 @@ export default function Attendance() {
       </div>
 
       <Card className="shadow-card border-border/60 p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ToggleGroup
+            type="single"
+            value={filters.shiftCategory}
+            onValueChange={(value) => value && setShiftCategory(value as AttendanceShiftCategory)}
+            className="justify-start rounded-md border border-border bg-muted/30 p-1"
+          >
+            <ToggleGroupItem value="09:00" className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm">
+              09:00 Shift
+            </ToggleGroupItem>
+            <ToggleGroupItem value="08:00" className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm">
+              08:00 Shift
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
         <div className="grid gap-3 md:grid-cols-4">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -420,7 +487,7 @@ export default function Attendance() {
             <TableBody>
               {rows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={14} className="text-center text-muted-foreground py-10">
                     No records match your filters.
                   </TableCell>
                 </TableRow>

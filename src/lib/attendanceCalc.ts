@@ -1,7 +1,8 @@
 // Attendance calculation rules for uploaded Excel rows.
-// Reporting time 09:00, grace 10 min => late if first_punch > 09:10
+// Default reporting time 09:00, grace 10 min => late if first_punch > 09:10
 // Departure 17:00 => early departure if last_punch < 17:00
 // No punch => Absent
+import { NINE_AM_SHIFT, type AttendanceShiftSettings } from "@/lib/attendanceShift";
 
 export const REPORTING_HOUR = 9;
 export const REPORTING_MIN = 0;
@@ -69,7 +70,11 @@ export function minutesToTimeStr(mins: number | null): string | null {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
 }
 
-export function computeStatus(firstPunchMin: number | null, lastPunchMin: number | null): ComputedAttendance {
+export function computeStatus(
+  firstPunchMin: number | null,
+  lastPunchMin: number | null,
+  shift: AttendanceShiftSettings = NINE_AM_SHIFT,
+): ComputedAttendance {
   // Validation rules:
   // - Missing First Punch -> Absent
   // - Missing Last Punch (but has First) -> Incomplete
@@ -78,9 +83,9 @@ export function computeStatus(firstPunchMin: number | null, lastPunchMin: number
     return { late_minutes: 0, early_departure_minutes: 0, extra_work_minutes: 0, status: "absent", summary: "Absent" };
   }
 
-  const startMin = REPORTING_HOUR * 60 + REPORTING_MIN; // 09:00
-  const lateThreshold = startMin + GRACE_MIN; // 09:10 (550 minutes)
-  const departLimit = DEPARTURE_HOUR * 60 + DEPARTURE_MIN; // 17:00
+  const startMin = shift.reportingHour * 60 + shift.reportingMin;
+  const lateThreshold = startMin + shift.graceMin;
+  const departLimit = shift.departureHour * 60 + shift.departureMin;
 
   // Late = First Punch - 09:10 (only if > 09:10, grace period applied)
   const late = firstPunchMin > lateThreshold ? firstPunchMin - lateThreshold : 0;
@@ -125,7 +130,8 @@ export function toDateStr(value: unknown): string | null {
   // dd-mm-yyyy or dd/mm/yyyy
   const m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
   if (m) {
-    let [_, d, mo, y] = m as any;
+    const [, d, mo, rawYear] = m;
+    let y = rawYear;
     if (y.length === 2) y = "20" + y;
     return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }

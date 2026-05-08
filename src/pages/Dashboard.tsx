@@ -132,8 +132,8 @@ function getMonthRange(month: string) {
 
 async function fetchAvailableMonths() {
   const [{ data: firstRows, error: firstError }, { data: lastRows, error: lastError }] = await Promise.all([
-    supabase.from("attendance_records").select("attendance_date").order("attendance_date", { ascending: true }).limit(1),
-    supabase.from("attendance_records").select("attendance_date").order("attendance_date", { ascending: false }).limit(1),
+    supabase.from("attendance_records_all").select("attendance_date").order("attendance_date", { ascending: true }).limit(1),
+    supabase.from("attendance_records_all").select("attendance_date").order("attendance_date", { ascending: false }).limit(1),
   ]);
 
   if (firstError) throw firstError;
@@ -156,7 +156,7 @@ async function fetchAvailableMonths() {
     months.map(async (value) => {
       const range = getMonthRange(value);
       const { count, error } = await supabase
-        .from("attendance_records")
+        .from("attendance_records_all")
         .select("*", { count: "exact", head: true })
         .gte("attendance_date", range.from)
         .lte("attendance_date", range.to);
@@ -176,7 +176,7 @@ async function fetchAllInRange(from: string, to: string) {
 
   while (true) {
     const { data, error } = await supabase
-      .from("attendance_records")
+      .from("attendance_records_all")
       .select(ATTENDANCE_COLUMNS)
       .gte("attendance_date", from)
       .lte("attendance_date", to)
@@ -195,14 +195,14 @@ async function fetchAllInRange(from: string, to: string) {
 }
 
 async function countAllRecords() {
-  const { count, error } = await supabase.from("attendance_records").select("*", { count: "exact", head: true });
+  const { count, error } = await supabase.from("attendance_records_all").select("*", { count: "exact", head: true });
   if (error) throw error;
   return count ?? 0;
 }
 
 async function countTodayByStatus(date: string, status: "present" | "absent") {
   const { count, error } = await supabase
-    .from("attendance_records")
+    .from("attendance_records_all")
     .select("*", { count: "exact", head: true })
     .eq("attendance_date", date)
     .ilike("status", status);
@@ -212,7 +212,7 @@ async function countTodayByStatus(date: string, status: "present" | "absent") {
 
 async function countTodayByMinutes(date: string, column: "late_minutes" | "early_departure_minutes") {
   const { count, error } = await supabase
-    .from("attendance_records")
+    .from("attendance_records_all")
     .select("*", { count: "exact", head: true })
     .eq("attendance_date", date)
     .gt(column, 0);
@@ -385,6 +385,15 @@ export default function Dashboard() {
     const channel = supabase
       .channel("dashboard-performance-refresh")
       .on("postgres_changes", { event: "*", schema: "public", table: "attendance_records" }, () => {
+        load();
+        fetchAvailableMonths()
+          .then(setAvailableMonths)
+          .catch((error) => {
+            console.error("Failed to load dashboard data:", error);
+            toast.error("Failed to load dashboard data");
+          });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance_records_archive" }, () => {
         load();
         fetchAvailableMonths()
           .then(setAvailableMonths)

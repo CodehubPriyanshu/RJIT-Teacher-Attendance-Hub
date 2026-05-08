@@ -112,6 +112,60 @@ export type Database = {
         }
         Relationships: []
       }
+      attendance_records_archive: {
+        Row: {
+          attendance_date: string
+          created_at: string
+          department: string | null
+          early_departure_minutes: number
+          extra_work_minutes: number
+          employee_id: string
+          first_name: string
+          first_punch: string | null
+          id: string
+          last_punch: string | null
+          late_minutes: number
+          record_number: number | null
+          status: string
+          total_time: string | null
+          weekday: string | null
+        }
+        Insert: {
+          attendance_date: string
+          created_at?: string
+          department?: string | null
+          early_departure_minutes?: number
+          extra_work_minutes?: number
+          employee_id: string
+          first_name: string
+          first_punch?: string | null
+          id?: string
+          last_punch?: string | null
+          late_minutes?: number
+          record_number?: number | null
+          status?: string
+          total_time?: string | null
+          weekday?: string | null
+        }
+        Update: {
+          attendance_date?: string
+          created_at?: string
+          department?: string | null
+          early_departure_minutes?: number
+          extra_work_minutes?: number
+          employee_id?: string
+          first_name?: string
+          first_punch?: string | null
+          id?: string
+          last_punch?: string | null
+          late_minutes?: number
+          record_number?: number | null
+          status?: string
+          total_time?: string | null
+          weekday?: string | null
+        }
+        Relationships: []
+      }
       holidays: {
         Row: {
           created_at: string
@@ -255,9 +309,35 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      attendance_records_all: {
+        Row: {
+          archived: boolean
+          attendance_date: string
+          created_at: string
+          department: string | null
+          early_departure_minutes: number
+          extra_work_minutes: number
+          employee_id: string
+          first_name: string
+          first_punch: string | null
+          id: string
+          last_punch: string | null
+          late_minutes: number
+          record_number: number | null
+          status: string
+          total_time: string | null
+          weekday: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      archive_attendance_records: {
+        Args: {
+          max_active_rows?: number
+        }
+        Returns: number
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

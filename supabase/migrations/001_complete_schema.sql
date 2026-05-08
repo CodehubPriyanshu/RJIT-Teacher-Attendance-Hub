@@ -190,7 +190,239 @@ CREATE POLICY "Authenticated update attendance_records"
   WITH CHECK (true);
 
 -- =====================================================
--- 5. HOLIDAYS TABLE
+-- 5. ATTENDANCE ARCHIVE STORAGE
+-- =====================================================
+-- Keeps the newest 5000 records in attendance_records and moves older rows
+-- into attendance_records_archive. Frontend reads use attendance_records_all.
+
+CREATE TABLE IF NOT EXISTS public.attendance_records_archive (
+  LIKE public.attendance_records INCLUDING DEFAULTS INCLUDING CONSTRAINTS
+);
+
+ALTER TABLE public.attendance_records_archive ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_employee_id
+  ON public.attendance_records_archive(employee_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_date
+  ON public.attendance_records_archive(attendance_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_department
+  ON public.attendance_records_archive(department);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_emp_date
+  ON public.attendance_records_archive(employee_id, attendance_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_status
+  ON public.attendance_records_archive(status);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_archive_first_name
+  ON public.attendance_records_archive(first_name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS attendance_records_archive_unique_emp_name_date
+  ON public.attendance_records_archive(employee_id, first_name, attendance_date);
+
+DROP POLICY IF EXISTS "Admins all attendance_records_archive" ON public.attendance_records_archive;
+DROP POLICY IF EXISTS "Authenticated read attendance_records_archive" ON public.attendance_records_archive;
+
+CREATE POLICY "Admins all attendance_records_archive"
+  ON public.attendance_records_archive
+  FOR ALL
+  TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'));
+
+CREATE POLICY "Authenticated read attendance_records_archive"
+  ON public.attendance_records_archive
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE OR REPLACE VIEW public.attendance_records_all
+WITH (security_invoker = true) AS
+SELECT
+  id,
+  record_number,
+  employee_id,
+  first_name,
+  department,
+  attendance_date,
+  weekday,
+  first_punch,
+  last_punch,
+  total_time,
+  late_minutes,
+  early_departure_minutes,
+  extra_work_minutes,
+  status,
+  created_at,
+  false AS archived
+FROM public.attendance_records
+UNION ALL
+SELECT
+  id,
+  record_number,
+  employee_id,
+  first_name,
+  department,
+  attendance_date,
+  weekday,
+  first_punch,
+  last_punch,
+  total_time,
+  late_minutes,
+  early_departure_minutes,
+  extra_work_minutes,
+  status,
+  created_at,
+  true AS archived
+FROM public.attendance_records_archive;
+
+GRANT SELECT ON public.attendance_records_all TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.remove_matching_attendance_archive_record()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  DELETE FROM public.attendance_records_archive
+  WHERE employee_id = NEW.employee_id
+    AND first_name = NEW.first_name
+    AND attendance_date = NEW.attendance_date;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_remove_matching_attendance_archive_record ON public.attendance_records;
+
+CREATE TRIGGER trg_remove_matching_attendance_archive_record
+  BEFORE INSERT OR UPDATE OF employee_id, first_name, attendance_date ON public.attendance_records
+  FOR EACH ROW
+  EXECUTE FUNCTION public.remove_matching_attendance_archive_record();
+
+CREATE OR REPLACE FUNCTION public.archive_attendance_records(max_active_rows integer DEFAULT 5000)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  active_count integer;
+  rows_to_archive integer;
+  deleted_count integer;
+BEGIN
+  IF max_active_rows < 1 THEN
+    RAISE EXCEPTION 'max_active_rows must be positive';
+  END IF;
+
+  SELECT count(*) INTO active_count
+  FROM public.attendance_records;
+
+  rows_to_archive := active_count - max_active_rows;
+  IF rows_to_archive <= 0 THEN
+    RETURN 0;
+  END IF;
+
+  DROP TABLE IF EXISTS pg_temp.attendance_archive_candidates;
+
+  CREATE TEMP TABLE attendance_archive_candidates
+  ON COMMIT DROP
+  AS
+  SELECT *
+  FROM public.attendance_records
+  ORDER BY attendance_date ASC, created_at ASC, id ASC
+  LIMIT rows_to_archive;
+
+  INSERT INTO public.attendance_records_archive (
+    id,
+    record_number,
+    employee_id,
+    first_name,
+    department,
+    attendance_date,
+    weekday,
+    first_punch,
+    last_punch,
+    total_time,
+    late_minutes,
+    early_departure_minutes,
+    extra_work_minutes,
+    status,
+    created_at
+  )
+  SELECT
+    id,
+    record_number,
+    employee_id,
+    first_name,
+    department,
+    attendance_date,
+    weekday,
+    first_punch,
+    last_punch,
+    total_time,
+    late_minutes,
+    early_departure_minutes,
+    extra_work_minutes,
+    status,
+    created_at
+  FROM attendance_archive_candidates
+  ON CONFLICT (employee_id, first_name, attendance_date) DO UPDATE SET
+    id = EXCLUDED.id,
+    record_number = EXCLUDED.record_number,
+    department = EXCLUDED.department,
+    weekday = EXCLUDED.weekday,
+    first_punch = EXCLUDED.first_punch,
+    last_punch = EXCLUDED.last_punch,
+    total_time = EXCLUDED.total_time,
+    late_minutes = EXCLUDED.late_minutes,
+    early_departure_minutes = EXCLUDED.early_departure_minutes,
+    extra_work_minutes = EXCLUDED.extra_work_minutes,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at;
+
+  DELETE FROM public.attendance_records ar
+  USING attendance_archive_candidates c
+  WHERE ar.id = c.id
+    AND EXISTS (
+      SELECT 1
+      FROM public.attendance_records_archive aa
+      WHERE aa.employee_id = c.employee_id
+        AND aa.first_name = c.first_name
+        AND aa.attendance_date = c.attendance_date
+    );
+
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+
+  IF deleted_count <> (SELECT count(*) FROM attendance_archive_candidates) THEN
+    RAISE EXCEPTION 'Archive safety check failed: expected %, deleted %',
+      (SELECT count(*) FROM attendance_archive_candidates),
+      deleted_count;
+  END IF;
+
+  RETURN deleted_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archive_attendance_records_trigger()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM public.archive_attendance_records(5000);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_archive_attendance_records ON public.attendance_records;
+
+CREATE TRIGGER trg_archive_attendance_records
+  AFTER INSERT OR UPDATE ON public.attendance_records
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION public.archive_attendance_records_trigger();
+
+-- =====================================================
+-- 6. HOLIDAYS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.holidays (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -226,7 +458,7 @@ CREATE POLICY "Authenticated read holidays"
   USING (true);
 
 -- =====================================================
--- 6. TRIGGERS & FUNCTIONS
+-- 7. TRIGGERS & FUNCTIONS
 -- =====================================================
 
 -- Auto-grant admin role to first signup
