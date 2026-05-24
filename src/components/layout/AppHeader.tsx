@@ -11,7 +11,7 @@ export function AppHeader() {
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-widest text-white/70 leading-none">Rustamji Institute of Technology</div>
           <h1 className="text-base md:text-lg font-bold leading-tight truncate">
-            Employees Attendance Upload System
+            Employees Attendance System
           </h1>
         </div>
       </div>

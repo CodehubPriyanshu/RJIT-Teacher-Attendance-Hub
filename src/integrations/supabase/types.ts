@@ -61,6 +61,7 @@ export type Database = {
       attendance_records: {
         Row: {
           attendance_date: string
+          comment: string | null
           created_at: string
           department: string | null
           early_departure_minutes: number
@@ -78,6 +79,7 @@ export type Database = {
         }
         Insert: {
           attendance_date: string
+          comment?: string | null
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
@@ -95,6 +97,7 @@ export type Database = {
         }
         Update: {
           attendance_date?: string
+          comment?: string | null
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
@@ -115,6 +118,7 @@ export type Database = {
       attendance_records_archive: {
         Row: {
           attendance_date: string
+          comment: string | null
           created_at: string
           department: string | null
           early_departure_minutes: number
@@ -132,6 +136,7 @@ export type Database = {
         }
         Insert: {
           attendance_date: string
+          comment?: string | null
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
@@ -149,6 +154,7 @@ export type Database = {
         }
         Update: {
           attendance_date?: string
+          comment?: string | null
           created_at?: string
           department?: string | null
           early_departure_minutes?: number
@@ -313,6 +319,7 @@ export type Database = {
         Row: {
           archived: boolean
           attendance_date: string
+          comment: string | null
           created_at: string
           department: string | null
           early_departure_minutes: number

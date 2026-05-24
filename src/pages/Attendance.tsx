@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Save, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { UploadAttendanceDialog } from "@/components/UploadAttendanceDialog";
@@ -32,6 +32,8 @@ interface Row {
   early_departure_minutes: number;
   extra_work_minutes?: number;
   status: string;
+  comment: string | null;
+  archived?: boolean;
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -130,6 +132,9 @@ export default function Attendance() {
   const [exporting, setExporting] = useState(false);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
   const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [savingCommentIds, setSavingCommentIds] = useState<Set<string>>(new Set());
+  const savingCommentIdsRef = useRef<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
@@ -189,6 +194,13 @@ export default function Attendance() {
         if (offset >= 100000) break;
       }
       setRows(pageRows);
+      setCommentDrafts((current) => {
+        const next = { ...current };
+        for (const row of pageRows) {
+          next[row.id] = row.comment ?? "";
+        }
+        return next;
+      });
       setCount(filteredCount);
     } catch (e: unknown) {
       toast.error(errorMessage(e, "Failed to load"));
@@ -322,6 +334,44 @@ export default function Attendance() {
       toast.error(errorMessage(e, "Export failed"));
     } finally {
       setExporting(false);
+    }
+  };
+
+  const updateCommentDraft = (id: string, value: string) => {
+    setCommentDrafts((current) => ({
+      ...current,
+      [id]: value.slice(0, 500),
+    }));
+  };
+
+  const saveComment = async (row: Row) => {
+    if (savingCommentIdsRef.current.has(row.id)) return;
+
+    const comment = (commentDrafts[row.id] ?? "").trim().slice(0, 500);
+    const table = row.archived ? "attendance_records_archive" : "attendance_records";
+
+    savingCommentIdsRef.current.add(row.id);
+    setSavingCommentIds((current) => new Set(current).add(row.id));
+    try {
+      const { error } = await supabase
+        .from(table)
+        .update({ comment })
+        .eq("id", row.id);
+
+      if (error) throw error;
+
+      setRows((current) => current.map((item) => (item.id === row.id ? { ...item, comment } : item)));
+      setCommentDrafts((current) => ({ ...current, [row.id]: comment }));
+      toast.success("Comment saved");
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Failed to save comment"));
+    } finally {
+      savingCommentIdsRef.current.delete(row.id);
+      setSavingCommentIds((current) => {
+        const next = new Set(current);
+        next.delete(row.id);
+        return next;
+      });
     }
   };
 
@@ -482,12 +532,13 @@ export default function Attendance() {
                 <TableHead className="table-head">Extra Work Time</TableHead>
                 <TableHead className="table-head">Status</TableHead>
                 <TableHead className="table-head">Summary</TableHead>
+                <TableHead className="table-head">Comment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={14} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={15} className="text-center text-muted-foreground py-10">
                     No records match your filters.
                   </TableCell>
                 </TableRow>
@@ -513,6 +564,29 @@ export default function Attendance() {
                   <TableCell><StatusBadge status={r.status} isHoliday={holidayDates.has(r.attendance_date)} /></TableCell>
                   <TableCell className="max-w-[260px] truncate" title={shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0)}>
                     {shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex w-[320px] items-center gap-2">
+                      <Input
+                        value={commentDrafts[r.id] ?? ""}
+                        onChange={(e) => updateCommentDraft(r.id, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveComment(r);
+                        }}
+                        maxLength={500}
+                        className="min-w-0 overflow-x-auto whitespace-nowrap"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => saveComment(r)}
+                        disabled={savingCommentIds.has(r.id)}
+                      >
+                        <Save className="h-4 w-4 mr-2" />
+                        {savingCommentIds.has(r.id) ? "Saving" : "Save"}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

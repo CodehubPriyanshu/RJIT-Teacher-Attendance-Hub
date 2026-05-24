@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS public.attendance_records (
   early_departure_minutes INTEGER NOT NULL DEFAULT 0,
   extra_work_minutes INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'present',
+  comment TEXT CHECK (char_length(comment) <= 500),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -250,6 +251,7 @@ SELECT
   early_departure_minutes,
   extra_work_minutes,
   status,
+  comment,
   created_at,
   false AS archived
 FROM public.attendance_records
@@ -269,6 +271,7 @@ SELECT
   early_departure_minutes,
   extra_work_minutes,
   status,
+  comment,
   created_at,
   true AS archived
 FROM public.attendance_records_archive;
@@ -346,6 +349,7 @@ BEGIN
     early_departure_minutes,
     extra_work_minutes,
     status,
+    comment,
     created_at
   )
   SELECT
@@ -363,6 +367,7 @@ BEGIN
     early_departure_minutes,
     extra_work_minutes,
     status,
+    comment,
     created_at
   FROM attendance_archive_candidates
   ON CONFLICT (employee_id, first_name, attendance_date) DO UPDATE SET
@@ -377,6 +382,7 @@ BEGIN
     early_departure_minutes = EXCLUDED.early_departure_minutes,
     extra_work_minutes = EXCLUDED.extra_work_minutes,
     status = EXCLUDED.status,
+    comment = EXCLUDED.comment,
     created_at = EXCLUDED.created_at;
 
   DELETE FROM public.attendance_records ar
