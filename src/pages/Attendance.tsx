@@ -39,6 +39,8 @@ interface Row {
 const PAGE_SIZES = [10, 25, 50, 100];
 type SortKey = "attendance_date" | "first_name" | "employee_id" | "record_number";
 type MinuteFilter = "all" | "10" | "20" | "30" | "more_than_30";
+const EXPORT_STATIC_COLUMNS = ["No", "Employee ID", "Employee Name", "Designation", "Department", "Date ->"];
+const EXPORT_BATCH_SIZE = 200;
 
 const DEFAULT_DEPARTMENT_OPTIONS = [
   "Faculty (Regular)",
@@ -72,6 +74,87 @@ function matchesMinuteFilter(value: number, filter: MinuteFilter) {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function parseISODate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatISODate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function endOfMonthDate(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function monthName(date: Date) {
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function exportTitle(from: Date, to: Date) {
+  const fromMonth = monthName(from);
+  const toMonth = monthName(to);
+  return `Attendance Report - ${fromMonth === toMonth ? fromMonth : `${fromMonth} to ${toMonth}`}`;
+}
+
+function getExportDateRange(records: Row[], filters: Filters) {
+  if (filters.selectedDate) {
+    const date = parseISODate(filters.selectedDate);
+    return { from: date, to: date };
+  }
+
+  if (filters.from && filters.to) {
+    return { from: parseISODate(filters.from), to: parseISODate(filters.to) };
+  }
+
+  const anchorDate =
+    filters.from ||
+    filters.to ||
+    records.map((record) => record.attendance_date).sort()[0] ||
+    formatISODate(new Date());
+  const anchor = parseISODate(anchorDate);
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+
+  return {
+    from: filters.from ? parseISODate(filters.from) : monthStart,
+    to: filters.to ? parseISODate(filters.to) : endOfMonthDate(anchor),
+  };
+}
+
+function getDatesInRange(from: Date, to: Date) {
+  const dates: Date[] = [];
+  let current = new Date(from);
+  while (current <= to) {
+    dates.push(new Date(current));
+    current = addDays(current, 1);
+  }
+  return dates;
+}
+
+function normalizeTime(value: string | null) {
+  return value?.slice(0, 5) || "";
+}
+
+function exportAttendanceValue(dateKey: string, record: Row | undefined, holidays: Set<string>, punch: "first_punch" | "last_punch") {
+  if (holidays.has(dateKey)) return "H";
+  if (!record) return "A";
+  return normalizeTime(record[punch]);
+}
+
+function sleep(ms = 0) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function styleCell(cell: XLSX.CellObject | undefined, style: Record<string, unknown>) {
+  if (cell) cell.s = style;
 }
 
 interface Filters {
@@ -308,28 +391,160 @@ export default function Attendance() {
         if (all.length >= 100000) break;
       }
       const filtered = applyClientFilters(all);
-      const ws = XLSX.utils.json_to_sheet(
-        filtered.map((r) => ({
-          No: r.record_number,
-          "Employee ID": r.employee_id,
-          "Teacher Name": r.first_name,
-          Department: r.department,
-          Date: r.attendance_date,
-          Weekday: r.weekday,
-          "First Punch": r.first_punch?.slice(0, 5) ?? "",
-          "Last Punch": r.last_punch?.slice(0, 5) ?? "",
-          "Total Time": r.total_time ?? "",
-          "Late Entry (Min)": formatMinutes(r.late_minutes),
-          "Early Dep. (Min)": formatMinutes(r.early_departure_minutes),
-          "Extra Work Time": formatMinutes(r.extra_work_minutes ?? 0),
-          Status: r.status,
-          Summary: shortSummary(r.late_minutes, r.early_departure_minutes, r.status, r.extra_work_minutes ?? 0),
-        })),
-      );
+      const { from, to } = getExportDateRange(filtered, appliedFilters);
+      const exportDates = getDatesInRange(from, to);
+      const exportDateKeys = exportDates.map(formatISODate);
+      const exportDateKeySet = new Set(exportDateKeys);
+      const exportHolidayDates = await fetchActiveHolidays(formatISODate(from), formatISODate(to));
+
+      const employeeMap = new Map<string, { details: Row; recordsByDate: Map<string, Row> }>();
+      for (let index = 0; index < filtered.length; index += 1) {
+        const record = filtered[index];
+        if (!exportDateKeySet.has(record.attendance_date)) continue;
+
+        const key = record.employee_id || record.first_name;
+        const employee = employeeMap.get(key);
+        if (employee) {
+          employee.recordsByDate.set(record.attendance_date, record);
+        } else {
+          employeeMap.set(key, {
+            details: record,
+            recordsByDate: new Map([[record.attendance_date, record]]),
+          });
+        }
+
+        if (index > 0 && index % 5000 === 0) {
+          await sleep();
+        }
+      }
+
+      const employees = Array.from(employeeMap.values()).sort((a, b) => {
+        const recordA = a.details.record_number ?? Number.MAX_SAFE_INTEGER;
+        const recordB = b.details.record_number ?? Number.MAX_SAFE_INTEGER;
+        if (recordA !== recordB) return recordA - recordB;
+        return a.details.first_name.localeCompare(b.details.first_name);
+      });
+
+      const title = exportTitle(from, to);
+      const aoa: (string | number | null)[][] = [
+        [title],
+        [...EXPORT_STATIC_COLUMNS, ...exportDates.map((date) => String(date.getDate()))],
+      ];
+
+      for (let index = 0; index < employees.length; index += 1) {
+        const employee = employees[index];
+        const { details, recordsByDate } = employee;
+        const punchInRow: (string | number | null)[] = [
+          index + 1,
+          details.employee_id,
+          details.first_name,
+          "",
+          details.department ?? "",
+          "Punch In",
+        ];
+        const punchOutRow: (string | number | null)[] = ["", "", "", "", "", "Punch Out"];
+
+        for (const dateKey of exportDateKeys) {
+          const record = recordsByDate.get(dateKey);
+          punchInRow.push(exportAttendanceValue(dateKey, record, exportHolidayDates, "first_punch"));
+          punchOutRow.push(exportAttendanceValue(dateKey, record, exportHolidayDates, "last_punch"));
+        }
+
+        aoa.push(punchInRow, punchOutRow);
+
+        if (index > 0 && index % EXPORT_BATCH_SIZE === 0) {
+          await sleep();
+        }
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      const lastColumn = EXPORT_STATIC_COLUMNS.length + exportDates.length - 1;
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastColumn } }];
+      ws["!cols"] = [
+        { wch: 8 },
+        { wch: 15 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 12 },
+        ...exportDates.map(() => ({ wch: 9 })),
+      ];
+      (ws as XLSX.WorkSheet & { "!freeze"?: { xSplit: number; ySplit: number } })["!freeze"] = {
+        xSplit: EXPORT_STATIC_COLUMNS.length,
+        ySplit: 2,
+      };
+
+      const titleStyle = {
+        font: { bold: true, sz: 16 },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: {
+          top: { style: "thin", color: { rgb: "666666" } },
+          bottom: { style: "thin", color: { rgb: "666666" } },
+        },
+      };
+      const headerStyle = {
+        font: { bold: true },
+        alignment: { horizontal: "center", vertical: "center" },
+        fill: { fgColor: { rgb: "D9EAF7" } },
+        border: {
+          top: { style: "thin", color: { rgb: "999999" } },
+          bottom: { style: "thin", color: { rgb: "999999" } },
+          left: { style: "thin", color: { rgb: "999999" } },
+          right: { style: "thin", color: { rgb: "999999" } },
+        },
+      };
+      const normalStyle = {
+        alignment: { horizontal: "center", vertical: "center" },
+        border: {
+          top: { style: "thin", color: { rgb: "D9D9D9" } },
+          bottom: { style: "thin", color: { rgb: "D9D9D9" } },
+          left: { style: "thin", color: { rgb: "D9D9D9" } },
+          right: { style: "thin", color: { rgb: "D9D9D9" } },
+        },
+      };
+      const detailStyle = {
+        ...normalStyle,
+        alignment: { horizontal: "left", vertical: "center" },
+      };
+      const holidayStyle = {
+        ...normalStyle,
+        fill: { fgColor: { rgb: "FFF2CC" } },
+      };
+      const absentStyle = {
+        ...normalStyle,
+        fill: { fgColor: { rgb: "F4CCCC" } },
+      };
+
+      styleCell(ws[XLSX.utils.encode_cell({ r: 0, c: 0 })], titleStyle);
+      for (let column = 0; column <= lastColumn; column += 1) {
+        styleCell(ws[XLSX.utils.encode_cell({ r: 1, c: column })], headerStyle);
+      }
+
+      for (let row = 2; row < aoa.length; row += 1) {
+        for (let column = 0; column <= lastColumn; column += 1) {
+          const cell = ws[XLSX.utils.encode_cell({ r: row, c: column })];
+          if (!cell) continue;
+          if (column < EXPORT_STATIC_COLUMNS.length) {
+            styleCell(cell, detailStyle);
+          } else if (cell.v === "H") {
+            styleCell(cell, holidayStyle);
+          } else if (cell.v === "A") {
+            styleCell(cell, absentStyle);
+          } else {
+            styleCell(cell, normalStyle);
+          }
+        }
+
+        if (row % (EXPORT_BATCH_SIZE * 2) === 0) {
+          await sleep();
+        }
+      }
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Attendance");
-      XLSX.writeFile(wb, `attendance_${new Date().toISOString().slice(0, 10)}.xlsx`);
-      toast.success(`Exported ${filtered.length.toLocaleString()} records`);
+      XLSX.writeFile(wb, `attendance_${formatISODate(from)}_${formatISODate(to)}.xlsx`);
+      toast.success(`Exported ${employees.length.toLocaleString()} employees across ${exportDates.length} day(s)`);
     } catch (e: unknown) {
       toast.error(errorMessage(e, "Export failed"));
     } finally {
