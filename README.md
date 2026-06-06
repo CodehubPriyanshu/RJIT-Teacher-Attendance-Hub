@@ -1,4 +1,4 @@
-# RJIT College Employess Attendance Hub
+# RJIT College Employees Attendance Hub
 
 Teacher Attendance Management System for Rustamji Institute of Technology.
 
