@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip as TooltipUI, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fetchEmployeeLeaves, findLeaveForDate, type EmployeeLeave } from "@/lib/leaves";
+import { fetchActiveHolidays } from "@/lib/workingDays";
 
 type StatTone = "primary" | "success" | "danger" | "accent" | "muted";
 
@@ -91,6 +93,7 @@ interface TeacherAgg {
   late: number;
   early: number;
   extra: number;
+  leaves: number;
   pct: number;
 }
 
@@ -243,12 +246,23 @@ function buildTrend(rows: AttendanceRecord[], fromDate: Date, toDate: Date) {
   return Array.from(trend.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function aggregateByTeacher(rows: AttendanceRecord[]) {
+function aggregateByTeacher(
+  rows: AttendanceRecord[],
+  leaves: EmployeeLeave[] = [],
+  holidayDates: Set<string> = new Set(),
+) {
   const grouped = new Map<string, TeacherAgg>();
   const workingDates = new Map<string, Set<string>>();
 
   for (const row of rows) {
     const key = teacherKey(row);
+
+    // Skip holiday dates entirely
+    if (holidayDates.has(row.attendance_date)) continue;
+
+    // Check if employee has approved leave on this date
+    const leave = findLeaveForDate(leaves, row.employee_id, row.attendance_date);
+
     if (!grouped.has(key)) {
       grouped.set(key, {
         employee_id: row.employee_id,
@@ -260,6 +274,7 @@ function aggregateByTeacher(rows: AttendanceRecord[]) {
         late: 0,
         early: 0,
         extra: 0,
+        leaves: 0,
         pct: 0,
       });
       workingDates.set(key, new Set<string>());
@@ -269,8 +284,20 @@ function aggregateByTeacher(rows: AttendanceRecord[]) {
     workingDates.get(key)!.add(row.attendance_date);
 
     const status = normalizeStatus(row.status);
-    if (status === "present") teacher.present++;
-    if (status === "absent") teacher.absent++;
+    const isHalfDay = leave?.leave_type === "Half Day";
+
+    if (isHalfDay) {
+      // Half day: count as 0.5 present, don't count as absent
+      teacher.present += 0.5;
+    } else if (leave) {
+      // Full day leave: count as a leave day, not absent or present
+      teacher.leaves++;
+    } else if (status === "present") {
+      teacher.present++;
+    } else if (status === "absent") {
+      teacher.absent++;
+    }
+
     if ((row.late_minutes ?? 0) > 0) teacher.late++;
     if ((row.early_departure_minutes ?? 0) > 0) teacher.early++;
     if ((row.extra_work_minutes ?? 0) > 0) teacher.extra++;
@@ -323,7 +350,7 @@ export default function Dashboard() {
       const trendStartDate = subDays(now, 13);
       const trendStart = format(trendStartDate, "yyyy-MM-dd");
 
-      const [totalRows, presentToday, lateToday, absentToday, earlyToday, trendRows, monthRows, todayRows] =
+      const [totalRows, presentToday, lateToday, absentToday, earlyToday, trendRows, monthRows, todayRows, leaves, holidayDates] =
         await Promise.all([
           countAllRecords(),
           countTodayByStatus(today, "present"),
@@ -333,7 +360,11 @@ export default function Dashboard() {
           fetchAllInRange(trendStart, today),
           fetchAllInRange(performanceMonth.from, performanceMonth.to),
           fetchAllInRange(today, today),
+          fetchEmployeeLeaves(),
+          fetchActiveHolidays(performanceMonth.from, performanceMonth.to),
         ]);
+
+      const leavesList = leaves as EmployeeLeave[];
 
       setTotal(totalRows);
       setPresent(presentToday);
@@ -342,7 +373,7 @@ export default function Dashboard() {
       setEarly(earlyToday);
       setTrend(buildTrend(trendRows, trendStartDate, now));
 
-      const monthAgg = aggregateByTeacher(monthRows);
+      const monthAgg = aggregateByTeacher(monthRows, leavesList, holidayDates);
       setTeachers(monthAgg);
       if (monthAgg.length) {
         setHighest(monthAgg[0]);
@@ -354,7 +385,7 @@ export default function Dashboard() {
         setMonthAvg(0);
       }
 
-      const todayAgg = aggregateByTeacher(todayRows);
+      const todayAgg = aggregateByTeacher(todayRows, leavesList, holidayDates);
       setTodayAvg(
         todayAgg.length
           ? Number((todayAgg.reduce((sum, row) => sum + row.pct, 0) / todayAgg.length).toFixed(2))
@@ -366,7 +397,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [now, performanceMonth.from, performanceMonth.to, today]);
+  }, [now, performanceMonth.from, performanceMonth.to, today, performanceMonth]);
 
   useEffect(() => {
     load();
@@ -403,6 +434,9 @@ export default function Dashboard() {
           });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "holidays" }, () => {
+        load();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "employee_leaves" }, () => {
         load();
       })
       .subscribe();
@@ -482,18 +516,24 @@ export default function Dashboard() {
           <h3 className="section-title">Attendance Trend (Last 14 Days)</h3>
         </div>
         <div className="h-80 px-3 pb-5" style={{ minHeight: 300, minWidth: 1 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="date" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
-              <Legend />
-              <Bar dataKey="present" stackId="a" fill="hsl(var(--success))" name="Present" />
-              <Bar dataKey="late" stackId="a" fill="hsl(var(--accent))" name="Late" />
-              <Bar dataKey="absent" stackId="a" fill="hsl(var(--danger))" name="Absent" />
-            </BarChart>
-          </ResponsiveContainer>
+          {trend.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="date" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                <YAxis allowDecimals={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
+                <Legend />
+                <Bar dataKey="present" stackId="a" fill="hsl(var(--success))" name="Present" />
+                <Bar dataKey="late" stackId="a" fill="hsl(var(--accent))" name="Late" />
+                <Bar dataKey="absent" stackId="a" fill="hsl(var(--danger))" name="Absent" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              No attendance data available for the trend period.
+            </div>
+          )}
         </div>
       </Card>
 
@@ -537,6 +577,7 @@ export default function Dashboard() {
                 <TableHead className="table-head">Late Entry</TableHead>
                 <TableHead className="table-head">Early Dep.</TableHead>
                 <TableHead className="table-head">Extra Work Days</TableHead>
+                <TableHead className="table-head">Leaves</TableHead>
                 <TableHead className="table-head">
                   <TooltipUI>
                     <TooltipTrigger>Avg %</TooltipTrigger>
@@ -550,7 +591,7 @@ export default function Dashboard() {
             <TableBody>
               {filteredTeachers.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground py-10">
                     No teacher data for this month.
                   </TableCell>
                 </TableRow>
@@ -564,6 +605,11 @@ export default function Dashboard() {
                   <TableCell>{t.late}</TableCell>
                   <TableCell>{t.early}</TableCell>
                   <TableCell>{t.extra}</TableCell>
+                  <TableCell>
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800">
+                      {t.leaves}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <span className={cn(
                       "px-2 py-0.5 rounded font-semibold",

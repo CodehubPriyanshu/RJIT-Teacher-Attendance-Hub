@@ -16,6 +16,7 @@ export function shortSummary(
   extraWorkMin: number = 0,
 ): string {
   if (status === "absent") return "Absent";
+  if (status === "leave") return "Leave";
   if (status === "incomplete")
     return lateMin > 0 ? `Late ${formatMinutes(lateMin)}, no Last Punch` : "No Last Punch";
   const parts: string[] = [];
